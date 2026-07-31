@@ -26,6 +26,31 @@
     return response.status === 204 ? null : response.json();
   }
 
+  function reportClientEvent(event, detail = "") {
+    fetch("/api/watch/client-events", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: sessionId, event, detail}),
+      keepalive: true
+    }).catch(() => {});
+  }
+
+  async function requestPlayback() {
+    try {
+      await video.play();
+      return true;
+    } catch (error) {
+      reportClientEvent("play-rejected", `${error.name}: ${error.message}`);
+      if (error.name === "NotAllowedError") {
+        message.textContent = "Press OK or click once to start playback";
+        return false;
+      }
+      console.error("Video playback could not start", error);
+      recover(true);
+      return false;
+    }
+  }
+
   async function stopSession() {
     clearInterval(heartbeat);
     clearTimeout(boundaryTimer);
@@ -80,11 +105,13 @@
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data.fatal) return;
           clearTimeout(timeout);
-          console.error("Fatal HLS playback error", {
+          const errorDetail = {
             type: data.type,
             details: data.details,
             error: data.error?.message || String(data.error || "")
-          });
+          };
+          console.error("Fatal HLS playback error", errorDetail);
+          reportClientEvent("hls-fatal", JSON.stringify(errorDetail));
           if (!startupComplete) {
             reject(new Error(`HLS startup failed: ${data.details || data.type}`));
           } else if (
@@ -113,10 +140,7 @@
       throw new Error("This browser has no HLS playback support");
     }
     if (signal.aborted) throw new DOMException("Tuning cancelled", "AbortError");
-    video.play().catch(error => {
-      console.error("Video playback could not start", error);
-      setTimeout(() => recover(true), 0);
-    });
+    return requestPlayback();
   }
 
   async function tune(channel, {boundary = false} = {}) {
@@ -138,7 +162,7 @@
       sessionId = result.session_id;
       nowInfo = result.now;
       renderNow();
-      await attach(result.playlist_url, signal);
+      const playbackStarted = await attach(result.playlist_url, signal);
       const boundaryDelay = Date.parse(nowInfo.item_end) - Date.now() + 250;
       boundaryTimer = setTimeout(
         () => {
@@ -158,7 +182,7 @@
           fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
         }
       }, 20000);
-      message.textContent = "";
+      if (playbackStarted) message.textContent = "";
       localStorage.setItem("fs42-channel", String(channel));
     } catch (error) {
       if (error.name === "AbortError") return;
@@ -242,8 +266,14 @@
   document.querySelector("#guide-close").onclick = () => document.querySelector("#guide").hidden = true;
   document.addEventListener("mousemove", showControls);
   document.addEventListener("click", showControls);
+  document.addEventListener("click", () => {
+    if (sessionId && video.paused && !document.hidden) requestPlayback();
+  });
   document.addEventListener("keydown", event => {
     showControls();
+    if ((event.key === "Enter" || event.key === " ") && sessionId && video.paused) {
+      requestPlayback();
+    }
     if (event.key === "ArrowUp" || event.key === "ArrowRight") adjacent(1);
     if (event.key === "ArrowDown" || event.key === "ArrowLeft") adjacent(-1);
     if (event.key.toLowerCase() === "m") document.querySelector("#mute").click();
@@ -251,10 +281,12 @@
     if (event.key.toLowerCase() === "g") document.querySelector("#guide-button").click();
   });
   video.addEventListener("error", () => {
-    console.error("Video element error", {
+    const errorDetail = {
       code: video.error?.code,
       message: video.error?.message
-    });
+    };
+    console.error("Video element error", errorDetail);
+    reportClientEvent("video-error", JSON.stringify(errorDetail));
     recover();
   });
   video.addEventListener("playing", () => {

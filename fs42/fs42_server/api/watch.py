@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -15,6 +16,7 @@ from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
+LOG = logging.getLogger("HomeTV.Client")
 PLAYLIST_STARTUP_ATTEMPTS = 200
 PLAYLIST_STARTUP_INTERVAL = 0.1
 PLAYLIST_READY_SEGMENTS = 3
@@ -24,6 +26,12 @@ PLAYLIST_READY_ATTEMPTS = 300
 class SessionRequest(BaseModel):
     channel: str
     profile: str = "auto"
+
+
+class ClientEvent(BaseModel):
+    session_id: str | None = None
+    event: str
+    detail: str = ""
 
 
 def _manager(request: Request):
@@ -67,6 +75,17 @@ async def channels(request: Request):
 @router.get("/status")
 async def broadcast_status(request: Request):
     return _manager(request).status()
+
+
+@router.post("/client-events", status_code=204)
+async def client_event(body: ClientEvent):
+    LOG.warning(
+        "Browser event session=%s event=%s detail=%s",
+        body.session_id or "none",
+        body.event[:80],
+        body.detail[:500],
+    )
+    return Response(status_code=204)
 
 
 @router.get("/channels/{channel}/now")
