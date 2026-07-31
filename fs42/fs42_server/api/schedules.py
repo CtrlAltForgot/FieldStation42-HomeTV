@@ -12,6 +12,10 @@ EPISODE_RE = re.compile(
     r"(?i)^(?P<series>.*?)[\s._-]*s(?P<season>\d{1,3})"
     r"[\s._-]*e(?P<episode>\d{1,3}[a-z]*)[\s._-]*(?P<title>.*)$"
 )
+LOOSE_EPISODE_RE = re.compile(
+    r"(?i)^(?P<collection>.*?)[\s._-]+(?P<episode>\d{1,3})"
+    r"[\s._-]+(?P<title>\D.*)$"
+)
 SEASON_DIR_RE = re.compile(r"(?i)^season[\s._-]*\d+$|^s\d+$")
 MOVIE_YEAR_RE = re.compile(r"(?<!\d)(?P<year>(?:19|20)\d{2})(?!\d)")
 RELEASE_SUFFIX_RE = re.compile(
@@ -145,6 +149,35 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
     return result
 
 
+def _directory_episode_display(path: str) -> dict:
+    """Parse numbered episodes whose filenames omit SxxExx notation.
+
+    Disc and short-form collections commonly use names such as
+    ``Schoolhouse Rock Multiplication Rock 08 Figure Eight``.  A matching
+    show directory gives us enough context to separate the program identity
+    from the collection label, track number, and actual episode title.
+    """
+    media_path = Path(path)
+    filename = _plain_title(media_path.stem)
+    filename_folded = filename.casefold()
+    for parent in media_path.parents[:4]:
+        series = _plain_title(parent.name)
+        if not series or not filename_folded.startswith(series.casefold() + " "):
+            continue
+        remainder = filename[len(series):].strip()
+        match = LOOSE_EPISODE_RE.match(remainder)
+        if not match:
+            continue
+        episode_title = RELEASE_SUFFIX_RE.sub("", match.group("title"))
+        return {
+            "display_title": _guide_title_alias(series),
+            "episode_title": _natural_title_case(_plain_title(episode_title)),
+            "season": None,
+            "episode": int(match.group("episode")),
+        }
+    return {}
+
+
 def _supplemental_display(path: str) -> dict:
     parts = Path(path).parts
     for index, part in enumerate(parts):
@@ -173,6 +206,7 @@ def program_display(path: str, fallback: str = "", meta: dict | None = None) -> 
     """Return one canonical program identity for the guide and watch client."""
     display = (
         _episode_display(path, meta)
+        or _directory_episode_display(path)
         or _supplemental_display(path)
         or _movie_display(path)
     )
