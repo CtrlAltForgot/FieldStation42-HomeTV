@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     FS42_DB_PATH=/app/runtime/fs42_fluid.db \
     FS42_HLS_DIR=/app/runtime/hls \
     FS42_HLS_TRANSCODE_THREADS=2 \
+    FS42_SCAN_CONCURRENCY=2 \
     FS42_SCAN_THREADS=1 \
     FS42_LOG_DIR=/app/logs \
     FS42_HEADLESS=1

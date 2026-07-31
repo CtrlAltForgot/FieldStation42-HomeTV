@@ -121,10 +121,11 @@ Open:
 
 Useful environment settings include `FS42_PORT`,
 `FS42_HLS_IDLE_SECONDS`, `FS42_HLS_MAX_SESSIONS`, and
-`FS42_SCAN_THREADS` (default `1`, allowed `1`–`4`) and
+`FS42_SCAN_THREADS` (default `1`, allowed `1`–`4`),
+`FS42_SCAN_CONCURRENCY` (default `2`, allowed `1`–`4`) and
 `FS42_HLS_TRANSCODE_THREADS` (default `2`, allowed `1`–`8`). Commercial
-analysis decodes only short chapter-boundary windows, runs one FFmpeg at a
-time, times out a stuck window after 30 seconds, and caches results for
+analysis decodes only short chapter-boundary windows, runs two single-threaded
+FFmpeg scans at a time, times out a stuck window after 30 seconds, and caches results for
 unchanged files. Live browser streams are capped separately by
 `FS42_HLS_MAX_SESSIONS` (default `4`); inactive streams are terminated as
 complete process groups. Container logs are available through `docker compose logs`;

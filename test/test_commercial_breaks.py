@@ -88,6 +88,19 @@ class CommercialBreakSelectionTests(unittest.TestCase):
                 "/media/show.mkv", 1320, chapters
             )
 
+    def test_scan_concurrency_limit_is_validated(self):
+        chapters = [
+            {"chapter_start": 0, "chapter_end": 300},
+            {"chapter_start": 300, "chapter_end": 1320},
+        ]
+        with (
+            patch.dict("os.environ", {"FS42_SCAN_CONCURRENCY": "12"}),
+            self.assertRaisesRegex(ValueError, "between 1 and 4"),
+        ):
+            MediaProcessor.black_detect_at_chapters(
+                "/media/show.mkv", 1320, chapters
+            )
+
     def test_chapter_window_scan_has_a_hard_timeout(self):
         chapters = [
             {"chapter_start": 0, "chapter_end": 300},
@@ -300,6 +313,7 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         black.assert_not_called()
         chapters.assert_not_called()
         store.assert_called_once_with(connection, feature.realpath, cached)
+        connection.commit.assert_called()
 
 
 if __name__ == "__main__":

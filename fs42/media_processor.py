@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 # Validate ffmpeg-python package
 try:
@@ -636,6 +637,14 @@ class MediaProcessor:
             raise ValueError("FS42_SCAN_THREADS must be an integer") from exc
         if not 1 <= scan_threads <= 4:
             raise ValueError("FS42_SCAN_THREADS must be between 1 and 4")
+        try:
+            scan_concurrency = int(
+                os.environ.get("FS42_SCAN_CONCURRENCY", "2")
+            )
+        except ValueError as exc:
+            raise ValueError("FS42_SCAN_CONCURRENCY must be an integer") from exc
+        if not 1 <= scan_concurrency <= 4:
+            raise ValueError("FS42_SCAN_CONCURRENCY must be between 1 and 4")
         chapters = MediaProcessor.calc_black_segments(
             [dict(segment) for segment in chapter_segments],
             base_duration,
@@ -656,12 +665,12 @@ class MediaProcessor:
             len(boundaries) * window_seconds * 2,
             base_duration,
         )
-        detected = []
         pattern = re.compile(
             r"black_start:(?P<start>[0-9.]+).*?"
             r"black_end:(?P<end>[0-9.]+)"
         )
-        for boundary in boundaries:
+
+        def inspect_boundary(boundary):
             window_start = max(0.0, boundary - window_seconds)
             window_duration = min(
                 window_seconds * 2,
@@ -705,7 +714,8 @@ class MediaProcessor:
                     boundary,
                     fname,
                 )
-                continue
+                return []
+            found = []
             for match in pattern.finditer(result.stderr):
                 midpoint = (
                     float(match.group("start")) + float(match.group("end"))
@@ -718,7 +728,20 @@ class MediaProcessor:
                     else window_start + midpoint
                 )
                 if abs(absolute - boundary) <= window_seconds:
-                    detected.append(absolute)
+                    found.append(absolute)
+            return found
+
+        # File-open and seek latency dominates short scans on network shares.
+        # A small bounded pool overlaps that latency while the independent
+        # decoder and filter thread limits keep total CPU predictable.
+        with ThreadPoolExecutor(
+            max_workers=min(scan_concurrency, len(boundaries) or 1)
+        ) as executor:
+            detected = [
+                point
+                for found in executor.map(inspect_boundary, boundaries)
+                for point in found
+            ]
 
         points = sorted(set(detected))
         if not points:

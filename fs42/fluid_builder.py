@@ -157,6 +157,7 @@ class FluidBuilder:
                         FluidStatements.add_chapter_points(
                             connection, entry.realpath, []
                         )
+                        connection.commit()
                         continue
                     stat = os.stat(entry.realpath)
                     cached = FluidStatements.get_commercial_break_scan(
@@ -176,6 +177,7 @@ class FluidBuilder:
                             total,
                             entry.realpath,
                         )
+                        connection.commit()
                         continue
                     self._l.info(
                         "Commercial boundaries %s/%s scanning: %s",
@@ -209,13 +211,16 @@ class FluidBuilder:
                     FluidStatements.add_chapter_points(
                         connection, entry.realpath, safe_segments
                     )
+                    # Preserve progress across container updates or cancelled
+                    # rebuilds. At worst, only the currently-scanning file
+                    # needs to be retried.
+                    connection.commit()
                     if safe_segments:
                         self._l.info(
                             "Added %s safe commercial segments for %s",
                             len(safe_segments),
                             entry.realpath,
                         )
-            connection.commit()
         finally:
             connection.close()
 
