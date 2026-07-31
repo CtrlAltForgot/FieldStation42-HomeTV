@@ -203,7 +203,7 @@
         Math.max(250, boundaryDelay)
       );
       heartbeat = setInterval(() => {
-        if (sessionId && !document.hidden && !video.paused && !video.ended) {
+        if (sessionId && !video.paused && !video.ended) {
           fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
         }
       }, 20000);
@@ -330,13 +330,6 @@
   });
   video.addEventListener("ended", transitionAfterPlayback);
   window.addEventListener("pagehide", stopSession);
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      stopSession();
-    } else if (!sessionId && channelSelect.value) {
-      tune(channelSelect.value);
-    }
-  });
   setInterval(() => {
     if (nowInfo) {
       const elapsed = (Date.now() - Date.parse(nowInfo.server_time)) / 1000 + nowInfo.elapsed;
@@ -345,5 +338,5 @@
   }, 1000);
   setInterval(refreshNow, 15000);
   showControls();
-  if (!document.hidden) start();
+  start();
 })();
