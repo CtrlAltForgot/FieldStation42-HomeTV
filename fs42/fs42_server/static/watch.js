@@ -10,6 +10,7 @@
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
   let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
+  let userMuted = false;
   const TRANSITION_MS = 450;
 
   const showControls = () => {
@@ -38,12 +39,15 @@
 
   async function requestPlayback() {
     try {
+      // Muted autoplay is permitted by TV and desktop browsers. Restore the
+      // viewer's audio preference from the `playing` event once media starts.
+      video.muted = true;
       await video.play();
       return true;
     } catch (error) {
       reportClientEvent("play-rejected", `${error.name}: ${error.message}`);
       if (error.name === "NotAllowedError") {
-        message.textContent = "Press OK or click once to start playback";
+        message.textContent = "Playback was blocked by browser autoplay settings";
         return false;
       }
       console.error("Video playback could not start", error);
@@ -274,11 +278,12 @@
   document.querySelector("#previous").onclick = () => adjacent(-1);
   document.querySelector("#next").onclick = () => adjacent(1);
   document.querySelector("#mute").onclick = () => {
-    video.muted = !video.muted;
-    document.body.classList.toggle("muted", video.muted);
+    userMuted = !userMuted;
+    video.muted = userMuted;
+    document.body.classList.toggle("muted", userMuted);
     document.querySelector("#mute").setAttribute(
       "aria-label",
-      video.muted ? "Unmute" : "Mute"
+      userMuted ? "Unmute" : "Mute"
     );
   };
   document.querySelector("#volume").oninput = event => video.volume = event.target.value;
@@ -316,6 +321,11 @@
     hlsNetworkRecoveries = 0;
     hlsMediaRecoveries = 0;
     message.textContent = "";
+    if (!userMuted) {
+      setTimeout(() => {
+        if (!userMuted && !video.paused) video.muted = false;
+      }, 100);
+    }
     requestAnimationFrame(() => video.classList.remove("switching"));
   });
   video.addEventListener("ended", transitionAfterPlayback);
