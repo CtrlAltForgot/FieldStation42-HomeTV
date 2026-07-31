@@ -100,7 +100,6 @@
         });
         hls.on(Hls.Events.FRAG_BUFFERED, () => {
           hlsNetworkRecoveries = 0;
-          hlsMediaRecoveries = 0;
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data.fatal) return;

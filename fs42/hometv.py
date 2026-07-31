@@ -349,7 +349,11 @@ class HLSSessionManager:
                     "-v",
                     "error",
                     "-show_entries",
-                    "stream=codec_type,codec_name:stream_tags=language",
+                    (
+                        "stream=codec_type,codec_name:"
+                        "stream_tags=language,title:"
+                        "stream_disposition=default,forced"
+                    ),
                     "-of",
                     "json",
                     media_path,
@@ -381,10 +385,25 @@ class HLSSessionManager:
         subtitles = [
             stream for stream in streams if stream.get("codec_type") == "subtitle"
         ]
+        candidates = []
         for index, stream in enumerate(subtitles):
             language = stream.get("tags", {}).get("language", "").casefold()
             if language in {"eng", "en"}:
-                return stream.get("codec_name", ""), index
+                title = stream.get("tags", {}).get("title", "").casefold()
+                disposition = stream.get("disposition", {})
+                score = 10 if disposition.get("default") else 0
+                if any(word in title for word in ("full", "dialogue", "dialog")):
+                    score += 20
+                if disposition.get("forced") or any(
+                    word in title for word in ("sign", "song", "forced")
+                ):
+                    score -= 100
+                candidates.append(
+                    (score, stream.get("codec_name", ""), index)
+                )
+        if candidates:
+            _score, codec, index = max(candidates, key=lambda item: item[0])
+            return codec, index
         return None
 
     @staticmethod
@@ -462,7 +481,11 @@ class HLSSessionManager:
                     )
                     video_filter = [
                         "-vf",
-                        f"subtitles='{escaped_path}':si={subtitle_index}",
+                        (
+                            f"setpts=PTS+{airing.offset:.3f}/TB,"
+                            f"subtitles='{escaped_path}':si={subtitle_index},"
+                            "setpts=PTS-STARTPTS"
+                        ),
                     ]
             command += ["-map", video_map, "-map", "0:a:0?", *video_filter]
             if copy_video:
@@ -504,7 +527,14 @@ class HLSSessionManager:
             if copy_audio:
                 command += ["-c:a", "copy"]
             else:
-                command += ["-c:a", "aac", "-b:a", "160k"]
+                command += [
+                    "-af", "aresample=async=1:first_pts=0",
+                    "-c:a", "aac",
+                    "-profile:a", "aac_low",
+                    "-b:a", "160k",
+                    "-ar", "48000",
+                    "-ac", "2",
+                ]
         command += [
             "-avoid_negative_ts",
             "make_zero",

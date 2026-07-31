@@ -442,6 +442,25 @@ class SessionTests(unittest.TestCase):
                 HLSSessionManager._english_subtitle("/media/show.mkv")
             )
 
+    def test_full_dialogue_subtitles_are_preferred_over_signs(self):
+        streams = [
+            {"codec_type": "audio", "tags": {"language": "jpn"}},
+            {
+                "codec_type": "subtitle",
+                "codec_name": "ass",
+                "tags": {"language": "eng", "title": "Signs & Songs"},
+            },
+            {
+                "codec_type": "subtitle",
+                "codec_name": "ass",
+                "tags": {"language": "eng", "title": "English Full Dialogue"},
+            },
+        ]
+        self.assertEqual(
+            HLSSessionManager._select_english_subtitle(streams),
+            ("ass", 1),
+        )
+
     def test_auto_profile_burns_selected_text_subtitle(self):
         when = dt.datetime.now()
         airing = Airing(
@@ -468,6 +487,23 @@ class SessionTests(unittest.TestCase):
         subtitle_filter = command[command.index("-vf") + 1]
         self.assertIn("subtitles=", subtitle_filter)
         self.assertIn(r"Attack on Titan\'s Return.mkv", subtitle_filter)
+        self.assertIn("setpts=PTS+30.000/TB", subtitle_filter)
+        self.assertTrue(subtitle_filter.endswith("setpts=PTS-STARTPTS"))
+
+    def test_auto_audio_is_normalized_for_browser_source_buffers(self):
+        when = dt.datetime.now()
+        airing = Airing(
+            "42", "Test TV", "Show", "Episode", when,
+            when + dt.timedelta(minutes=30), when,
+            when + dt.timedelta(minutes=30), "/media/show.mkv", 0, 1800, 1800,
+        )
+        command = HLSSessionManager._ffmpeg_command(
+            airing, "auto", Path("/tmp/hls"), streams=[]
+        )
+        self.assertEqual(command[command.index("-profile:a") + 1], "aac_low")
+        self.assertEqual(command[command.index("-ar") + 1], "48000")
+        self.assertEqual(command[command.index("-ac") + 1], "2")
+        self.assertIn("aresample=async=1:first_pts=0", command)
 
     def test_hls_asset_traversal_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
