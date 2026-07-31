@@ -16,7 +16,7 @@ from fs42.liquid_blocks import LiquidBlock
 
 class CommercialBreakSelectionTests(unittest.TestCase):
     def test_current_detector_invalidates_pre_optimization_cache(self):
-        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 6)
+        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 7)
 
     def test_commercial_scan_cache_validates_file_identity_and_version(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,6 +171,31 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         self.assertEqual(
             [item["chapter_end"] for item in segments[:-1]],
             [300.0, 600.0, 900.0],
+        )
+
+    def test_half_hour_breaks_are_capped_at_three(self):
+        boundaries = [0, 180, 360, 540, 720, 900, 1080, 1320]
+        segments = [
+            {
+                "chapter_start": boundaries[index],
+                "chapter_end": boundaries[index + 1],
+            }
+            for index in range(len(boundaries) - 1)
+        ]
+        capped = MediaProcessor.cap_commercial_segments(segments, 1320)
+        self.assertEqual(len(capped) - 1, 3)
+        self.assertEqual(capped[0]["chapter_start"], 0.0)
+        self.assertEqual(capped[-1]["chapter_end"], 1320.0)
+
+    def test_cap_does_not_require_or_invent_breaks(self):
+        segments = [
+            {"chapter_start": 0, "chapter_end": 600},
+            {"chapter_start": 600, "chapter_end": 1320},
+        ]
+        capped = MediaProcessor.cap_commercial_segments(segments, 1320)
+        self.assertEqual(
+            [(item["chapter_start"], item["chapter_end"]) for item in capped],
+            [(0, 600), (600, 1320)],
         )
 
     def test_action_chapter_is_not_mistaken_for_explicit_act_marker(self):

@@ -11,9 +11,9 @@ from fs42.station_manager import StationManager
 from fs42.database import connect
 
 class FluidBuilder:
-    # Version 6 removes count-based assumptions: every persisted boundary must
-    # be independently supported by authored or audiovisual evidence.
-    COMMERCIAL_BREAK_DETECTOR_VERSION = 6
+    # Version 7 adds duration-based maximums as a final failsafe without
+    # requiring or inventing any minimum number of breaks.
+    COMMERCIAL_BREAK_DETECTOR_VERSION = 7
 
     def __init__(self, db_path=None):
         if db_path is None:
@@ -209,6 +209,9 @@ class FluidBuilder:
                             entry.duration,
                             chapter_segments,
                         )
+                    safe_segments = MediaProcessor.cap_commercial_segments(
+                        safe_segments, entry.duration
+                    )
                     FluidStatements.add_commercial_break_scan(
                         connection,
                         entry.realpath,

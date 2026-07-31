@@ -539,6 +539,49 @@ class MediaProcessor:
         ]
 
     @staticmethod
+    def cap_commercial_segments(segments, content_duration):
+        """Apply a duration-based maximum without manufacturing breaks."""
+        if content_duration < 15 * timings.MIN_1:
+            maximum = 2
+        elif content_duration <= 35 * timings.MIN_1:
+            maximum = 3
+        elif content_duration <= 65 * timings.MIN_1:
+            maximum = 6
+        else:
+            maximum = 8
+
+        normalized = MediaProcessor.calc_black_segments(
+            [dict(segment) for segment in (segments or [])],
+            content_duration,
+        )
+        candidates = sorted(
+            {
+                float(segment["chapter_end"])
+                for segment in normalized[:-1]
+            }
+        )
+        if len(candidates) <= maximum:
+            return normalized
+
+        remaining = set(candidates)
+        selected = []
+        for index in range(1, maximum + 1):
+            target = content_duration * index / (maximum + 1)
+            point = min(remaining, key=lambda candidate: abs(candidate - target))
+            remaining.remove(point)
+            selected.append(point)
+
+        boundaries = [0.0, *sorted(selected), float(content_duration)]
+        return [
+            {
+                "chapter_start": boundaries[index],
+                "chapter_end": boundaries[index + 1],
+                "segment_duration": boundaries[index + 1] - boundaries[index],
+            }
+            for index in range(len(boundaries) - 1)
+        ]
+
+    @staticmethod
     def black_detect(fname, base_duration, black_min_duration=0.1, black_pixel_tresh=0.1, black_ratio_thresh=0.95):
         _l = logging.getLogger("MEDIA")
         _l.info(f"Detecting black frames in {fname}")
