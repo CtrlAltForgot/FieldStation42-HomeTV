@@ -42,7 +42,22 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         self.assertIs(selected, exact)
 
     def test_current_detector_invalidates_pre_optimization_cache(self):
-        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 7)
+        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 8)
+
+    def test_breaks_are_rejected_within_first_or_last_three_minutes(self):
+        chapters = [
+            {"chapter_start": 0, "chapter_end": 150, "title": "Act 1"},
+            {"chapter_start": 150, "chapter_end": 600, "title": "Act 2"},
+            {"chapter_start": 600, "chapter_end": 1170, "title": "Act 3"},
+            {"chapter_start": 1170, "chapter_end": 1320, "title": "Credits"},
+        ]
+        segments = MediaProcessor.safe_commercial_segments(
+            chapters, 1320, chapters
+        )
+        self.assertEqual(
+            [(item["chapter_start"], item["chapter_end"]) for item in segments],
+            [(0.0, 600.0), (600.0, 1320.0)],
+        )
 
     def test_commercial_scan_cache_validates_file_identity_and_version(self):
         with tempfile.TemporaryDirectory() as temp_dir:

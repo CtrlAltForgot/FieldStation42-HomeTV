@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -269,6 +269,21 @@ class HLSSessionManager:
                 if boundary_at is not None
                 else self.resolver.now(channel)
             )
+            if boundary_at is not None and airing.content_type in {
+                "commercial", "bump"
+            }:
+                try:
+                    following = self.resolver.now(channel, airing.item_end)
+                except WatchError:
+                    following = None
+                if following is not None and following.content_type == "feature":
+                    wall_remaining = max(
+                        0.1, (airing.item_end - _local_now()).total_seconds()
+                    )
+                    airing = replace(
+                        airing,
+                        remaining=min(airing.remaining, wall_remaining),
+                    )
             key = (airing.channel_number, profile)
             broadcast = self.broadcasts.get(key)
             if broadcast is not None and (

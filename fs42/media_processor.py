@@ -474,7 +474,7 @@ class MediaProcessor:
         black_segments,
         content_duration,
         chapter_segments=None,
-        edge_guard=120,
+        edge_guard=180,
         minimum_spacing=180,
         alignment_tolerance=5,
     ):

@@ -479,20 +479,61 @@ class SessionTests(unittest.TestCase):
                 boundary + dt.timedelta(seconds=30), str(media), 0, 30, 30,
                 content_type="commercial",
             )
+            feature = Airing(
+                "42", "Test TV", "Next Show", "Episode", airing.item_end,
+                airing.item_end + dt.timedelta(minutes=30), airing.item_end,
+                airing.item_end + dt.timedelta(minutes=22), str(media), 0,
+                1800, 1320, content_type="feature",
+            )
             calls = []
 
             def resolve(channel, when):
                 calls.append((channel, when))
-                return airing
+                return airing if when == boundary else feature
 
             manager = HLSSessionManager(
                 resolver=SimpleNamespace(now=resolve),
                 root=Path(temp_dir) / "hls",
                 process_factory=lambda command, **_kwargs: FakeProcess(command),
             )
-            session, selected = manager.create("42", boundary_at=boundary)
+            with patch(
+                "fs42.hometv._local_now",
+                return_value=boundary + dt.timedelta(seconds=5),
+            ):
+                session, selected = manager.create("42", boundary_at=boundary)
 
-            self.assertEqual(calls, [("42", boundary)])
+            self.assertEqual(
+                calls, [("42", boundary), ("42", airing.item_end)]
+            )
+            self.assertEqual(selected.offset, 0)
+            # Only the tail is shortened to put the following show on time.
+            self.assertEqual(selected.remaining, 25)
+            manager.delete(session.session_id)
+            manager.close()
+
+    def test_commercial_before_commercial_is_not_shortened(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "commercial.mkv"
+            media.touch()
+            boundary = dt.datetime(2026, 7, 31, 18, 30)
+            commercial = Airing(
+                "42", "Test TV", "Show", "Commercial", boundary,
+                boundary + dt.timedelta(seconds=30), boundary,
+                boundary + dt.timedelta(seconds=30), str(media), 0, 30, 30,
+                content_type="commercial",
+            )
+            resolver = SimpleNamespace(now=lambda _channel, _when: commercial)
+            manager = HLSSessionManager(
+                resolver=resolver,
+                root=Path(temp_dir) / "hls",
+                process_factory=lambda command, **_kwargs: FakeProcess(command),
+            )
+            with patch(
+                "fs42.hometv._local_now",
+                return_value=boundary + dt.timedelta(seconds=5),
+            ):
+                session, selected = manager.create("42", boundary_at=boundary)
+
             self.assertEqual(selected.offset, 0)
             self.assertEqual(selected.remaining, 30)
             manager.delete(session.session_id)

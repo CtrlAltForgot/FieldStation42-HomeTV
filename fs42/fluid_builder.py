@@ -11,9 +11,8 @@ from fs42.station_manager import StationManager
 from fs42.database import connect
 
 class FluidBuilder:
-    # Version 7 adds duration-based maximums as a final failsafe without
-    # requiring or inventing any minimum number of breaks.
-    COMMERCIAL_BREAK_DETECTOR_VERSION = 7
+    # Version 8 expands the protected opening/credits windows to three minutes.
+    COMMERCIAL_BREAK_DETECTOR_VERSION = 8
 
     def __init__(self, db_path=None):
         if db_path is None:
