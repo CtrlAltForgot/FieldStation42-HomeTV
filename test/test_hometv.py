@@ -219,6 +219,15 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(display["episode"], 8)
         self.assertEqual(display["program_details"], "Episode 8: Figure Eight")
 
+    def test_numbered_short_in_shared_channel_folder_uses_known_series(self):
+        display = program_display(
+            "/media/Toon Mix/"
+            "Schoolhouse Rock Multiplication Rock 08 Figure Eight.mkv"
+        )
+        self.assertEqual(display["display_title"], "Schoolhouse Rock")
+        self.assertEqual(display["episode_title"], "Figure Eight")
+        self.assertEqual(display["program_details"], "Episode 8: Figure Eight")
+
     def test_recursive_scan_ignores_movie_auxiliary_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

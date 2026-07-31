@@ -10,7 +10,9 @@
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
   let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
-  let userMuted = false;
+  let userMuted = localStorage.getItem("fs42-muted") === "true";
+  const savedVolumeValue = localStorage.getItem("fs42-volume");
+  const savedVolume = savedVolumeValue === null ? 1 : Number(savedVolumeValue);
   const TRANSITION_MS = 450;
 
   const showControls = () => {
@@ -39,12 +41,20 @@
 
   async function requestPlayback() {
     try {
-      // Muted autoplay is permitted by TV and desktop browsers. Restore the
-      // viewer's audio preference from the `playing` event once media starts.
-      video.muted = true;
+      video.muted = userMuted;
       await video.play();
       return true;
     } catch (error) {
+      // Browsers may reject audible autoplay until this site has received a
+      // user gesture. Keep television-style startup working in that one case,
+      // then restore the saved sound preference from the `playing` event.
+      if (error.name === "NotAllowedError" && !userMuted) {
+        try {
+          video.muted = true;
+          await video.play();
+          return true;
+        } catch (_) {}
+      }
       reportClientEvent("play-rejected", `${error.name}: ${error.message}`);
       if (error.name === "NotAllowedError") {
         message.textContent = "Playback was blocked by browser autoplay settings";
@@ -279,6 +289,7 @@
   document.querySelector("#next").onclick = () => adjacent(1);
   document.querySelector("#mute").onclick = () => {
     userMuted = !userMuted;
+    localStorage.setItem("fs42-muted", String(userMuted));
     video.muted = userMuted;
     document.body.classList.toggle("muted", userMuted);
     document.querySelector("#mute").setAttribute(
@@ -286,7 +297,10 @@
       userMuted ? "Unmute" : "Mute"
     );
   };
-  document.querySelector("#volume").oninput = event => video.volume = event.target.value;
+  document.querySelector("#volume").oninput = event => {
+    video.volume = event.target.value;
+    localStorage.setItem("fs42-volume", String(video.volume));
+  };
   document.querySelector("#fullscreen").onclick = () => document.querySelector("#viewer").requestFullscreen();
   document.querySelector("#guide-button").onclick = () => document.querySelector("#guide").hidden = false;
   document.querySelector("#guide-close").onclick = () => document.querySelector("#guide").hidden = true;
@@ -337,6 +351,16 @@
     }
   }, 1000);
   setInterval(refreshNow, 15000);
+  if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 1) {
+    video.volume = savedVolume;
+    document.querySelector("#volume").value = savedVolume;
+  }
+  video.muted = userMuted;
+  document.body.classList.toggle("muted", userMuted);
+  document.querySelector("#mute").setAttribute(
+    "aria-label",
+    userMuted ? "Unmute" : "Mute"
+  );
   showControls();
   start();
 })();

@@ -28,6 +28,7 @@ TRAILING_NOTE_RE = re.compile(
     re.IGNORECASE,
 )
 TITLE_ALIASES = {
+    "schoolhouse rock": "Schoolhouse Rock",
     "shingeki no kyojin": "Attack on Titan",
     "spongebob": "SpongeBob SquarePants",
     "spongebob squarepants": "SpongeBob SquarePants",
@@ -178,6 +179,27 @@ def _directory_episode_display(path: str) -> dict:
     return {}
 
 
+def _known_series_episode_display(path: str) -> dict:
+    """Parse numbered shorts even when they live in a shared channel folder."""
+    filename = _plain_title(Path(path).stem)
+    filename_folded = filename.casefold()
+    for source, display_title in TITLE_ALIASES.items():
+        if not filename_folded.startswith(source + " "):
+            continue
+        remainder = filename[len(source):].strip()
+        match = LOOSE_EPISODE_RE.match(remainder)
+        if not match:
+            continue
+        episode_title = RELEASE_SUFFIX_RE.sub("", match.group("title"))
+        return {
+            "display_title": display_title,
+            "episode_title": _natural_title_case(_plain_title(episode_title)),
+            "season": None,
+            "episode": int(match.group("episode")),
+        }
+    return {}
+
+
 def _supplemental_display(path: str) -> dict:
     parts = Path(path).parts
     for index, part in enumerate(parts):
@@ -207,6 +229,7 @@ def program_display(path: str, fallback: str = "", meta: dict | None = None) -> 
     display = (
         _episode_display(path, meta)
         or _directory_episode_display(path)
+        or _known_series_episode_display(path)
         or _supplemental_display(path)
         or _movie_display(path)
     )
