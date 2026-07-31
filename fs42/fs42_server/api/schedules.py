@@ -24,9 +24,9 @@ RELEASE_SUFFIX_RE = re.compile(
     r"x26[45]|h[\s._-]?26[45]|hevc|av1|aac\d*|ac3|eac3)(?:\b|$).*$"
 )
 PAREN_RELEASE_SUFFIX_RE = re.compile(
-    r"(?i)\s*\((?:480p|720p|1080p|2160p|4k|web[\s._-]?(?:dl|rip)|"
+    r"(?i)\s*[\(\[]\s*(?:480p|720p|1080p|2160p|4k|web[\s._-]?(?:dl|rip)|"
     r"blu[\s._-]?ray|bluray|remux|hdr|dv|x26[45]|h[\s._-]?26[45]|"
-    r"hevc|av1|aac\d*|ac3|eac3)(?:[^()]*)\)\s*$"
+    r"hevc|av1|aac\d*|ac3|eac3)\b.*$"
 )
 TRAILING_NOTE_RE = re.compile(
     r"\s*\((?!(?:19|20)\d{2}\)\s*$)[^()]+\)\s*$",
