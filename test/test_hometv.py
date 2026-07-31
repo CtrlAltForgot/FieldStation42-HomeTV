@@ -116,7 +116,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(display["display_title"], "SpongeBob SquarePants")
         self.assertEqual(display["episode_title"], "Squidtastic Voyage")
         self.assertEqual(display["season"], 4)
-        self.assertEqual(display["episode"], "15ab")
+        self.assertEqual(display["episode"], 15)
 
     def test_episode_display_uses_show_directory_when_filename_starts_with_code(self):
         path = (
@@ -241,6 +241,17 @@ class ResolverTests(unittest.TestCase):
             "Shingeki No Kyojin S04E01 The Other Side.mkv"
         )
         self.assertEqual(display["display_title"], "Attack on Titan")
+
+    def test_split_episode_code_is_normalized_for_viewers(self):
+        display = program_display(
+            "/media/SpongeBob SquarePants/Season 06/"
+            "SpongeBob SquarePants S06E05A The Splinter.mkv"
+        )
+        self.assertEqual(display["episode"], 5)
+        self.assertEqual(
+            display["program_details"],
+            "Season 6, Episode 5: The Splinter",
+        )
 
     def test_numbered_short_uses_directory_and_episode_title(self):
         display = program_display(

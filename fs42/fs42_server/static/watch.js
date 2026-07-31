@@ -10,6 +10,7 @@
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
   let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
+  let mutedAutoplayFallback = false;
   let userMuted = localStorage.getItem("fs42-muted") === "true";
   const savedVolumeValue = localStorage.getItem("fs42-volume");
   const savedVolume = savedVolumeValue === null ? 1 : Number(savedVolumeValue);
@@ -51,6 +52,7 @@
         try {
           video.muted = true;
           await video.play();
+          mutedAutoplayFallback = true;
           return true;
         } catch (_) {}
       }
@@ -300,6 +302,10 @@
   document.addEventListener("mousemove", showControls);
   document.addEventListener("click", showControls);
   document.addEventListener("click", () => {
+    if (mutedAutoplayFallback) {
+      mutedAutoplayFallback = false;
+      video.muted = userMuted;
+    }
     if (sessionId && video.paused && !document.hidden) requestPlayback();
   });
   document.addEventListener("keydown", event => {
@@ -328,9 +334,11 @@
     hlsNetworkRecoveries = 0;
     hlsMediaRecoveries = 0;
     message.textContent = "";
-    if (!userMuted) {
+    if (!userMuted && !mutedAutoplayFallback) {
       setTimeout(() => {
-        if (!userMuted && !video.paused) video.muted = false;
+        if (!userMuted && !mutedAutoplayFallback && !video.paused) {
+          video.muted = false;
+        }
       }, 100);
     }
     requestAnimationFrame(() => video.classList.remove("switching"));

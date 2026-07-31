@@ -60,6 +60,14 @@ def _natural_title_case(title: str) -> str:
     )
 
 
+def _display_episode_number(value):
+    """Normalize file-oriented episode codes for television-style labels."""
+    if value in (None, ""):
+        return value
+    match = re.match(r"\s*0*(\d+)", str(value))
+    return int(match.group(1)) if match else value
+
+
 def _plain_title(title: str) -> str:
     cleaned = re.sub(r"\s+", " ", re.sub(r"[._-]+", " ", title)).strip()
     return " ".join(
@@ -172,7 +180,7 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
         ),
         "episode_title": _natural_title_case(episode_title or ""),
         "season": season,
-        "episode": episode,
+        "episode": _display_episode_number(episode),
     }
     return result
 
