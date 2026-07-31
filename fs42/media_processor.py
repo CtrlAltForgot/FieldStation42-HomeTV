@@ -630,6 +630,12 @@ class MediaProcessor:
         """
         if not chapter_segments:
             return []
+        try:
+            scan_threads = int(os.environ.get("FS42_SCAN_THREADS", "1"))
+        except ValueError as exc:
+            raise ValueError("FS42_SCAN_THREADS must be an integer") from exc
+        if not 1 <= scan_threads <= 4:
+            raise ValueError("FS42_SCAN_THREADS must be between 1 and 4")
         chapters = MediaProcessor.calc_black_segments(
             [dict(segment) for segment in chapter_segments],
             base_duration,
@@ -668,6 +674,10 @@ class MediaProcessor:
                     "-nostdin",
                     "-loglevel",
                     "info",
+                    "-threads",
+                    str(scan_threads),
+                    "-filter_threads",
+                    str(scan_threads),
                     "-ss",
                     f"{window_start:.3f}",
                     "-i",

@@ -52,7 +52,10 @@ chapter table, then FFmpeg inspects only a ten-second window centered on each
 eligible boundary. Results are cached in `commercial_break_scans` using the
 canonical path, file size, nanosecond modification time, and detector version.
 Unchanged files reuse that cache on subsequent rebuilds; new, changed, or
-detector-version-invalidated files alone are inspected.
+detector-version-invalidated files alone are inspected. Analysis FFmpeg
+processes default to one decoder/filter thread (`FS42_SCAN_THREADS=1`) so a
+catalog rebuild cannot automatically occupy every server core. This limit is
+independent of live HLS transcoding.
 
 For a request at time `now`, Home TV selects the row satisfying
 `start_time <= now < end_time`. It then walks the ordered plan from the block

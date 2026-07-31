@@ -67,10 +67,25 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         for call in run.call_args_list:
             command = call.args[0]
             self.assertEqual(command[command.index("-t") + 1], "10.000")
+            self.assertEqual(command[command.index("-threads") + 1], "1")
+            self.assertEqual(command[command.index("-filter_threads") + 1], "1")
         self.assertEqual(
             [(item["chapter_start"], item["chapter_end"]) for item in segments],
             [(0.0, 300.0), (300.0, 700.0), (700.0, 1320.0)],
         )
+
+    def test_scan_thread_limit_is_validated(self):
+        chapters = [
+            {"chapter_start": 0, "chapter_end": 300},
+            {"chapter_start": 300, "chapter_end": 1320},
+        ]
+        with (
+            patch.dict("os.environ", {"FS42_SCAN_THREADS": "12"}),
+            self.assertRaisesRegex(ValueError, "between 1 and 4"),
+        ):
+            MediaProcessor.black_detect_at_chapters(
+                "/media/show.mkv", 1320, chapters
+            )
 
     def test_safe_breaks_ignore_opening_credits_and_nearby_black_frames(self):
         detected = [
