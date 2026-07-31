@@ -217,6 +217,18 @@ class ResolverTests(unittest.TestCase):
 
 
 class SessionTests(unittest.TestCase):
+    def test_default_session_limit_is_bounded(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(
+                "os.environ",
+                {
+                    "FS42_HLS_DIR": temp_dir,
+                    "FS42_HLS_MAX_SESSIONS": "",
+                },
+            ):
+                manager = HLSSessionManager(resolver=SimpleNamespace())
+        self.assertEqual(manager.max_sessions, 4)
+
     def test_session_command_and_cleanup(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             media = Path(temp_dir) / "show.mkv"
@@ -259,6 +271,45 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(manager.delete(session.session_id))
             self.assertFalse(session.directory.exists())
             self.assertEqual(processes[0].returncode, 0)
+
+    def test_session_starts_ffmpeg_in_its_own_process_group(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "show.mkv"
+            media.touch()
+            when = dt.datetime.now()
+            airing = Airing(
+                "42", "Test TV", "Show", "Episode", when,
+                when + dt.timedelta(minutes=30), when,
+                when + dt.timedelta(minutes=30), str(media), 0, 1800, 1800,
+            )
+            process_options = {}
+
+            def factory(command, **kwargs):
+                process_options.update(kwargs)
+                return FakeProcess(command)
+
+            manager = HLSSessionManager(
+                resolver=SimpleNamespace(now=lambda channel: airing),
+                root=Path(temp_dir) / "hls",
+                process_factory=factory,
+            )
+            session, _ = manager.create("42")
+            self.assertTrue(process_options["start_new_session"])
+            manager.delete(session.session_id)
+
+    def test_stop_signals_entire_ffmpeg_process_group(self):
+        process = FakeProcess(["ffmpeg"])
+        process.pid = 4242
+        session = SimpleNamespace(
+            process=process,
+            directory=Path("/tmp/nonexistent-fs42-hls-test"),
+        )
+        with patch("fs42.hometv.os.killpg") as killpg:
+            HLSSessionManager._stop(session)
+        self.assertEqual(
+            [call.args for call in killpg.call_args_list],
+            [(4242, 15), (4242, 9)],
+        )
 
     def test_non_english_audio_selects_english_subtitles(self):
         probe = SimpleNamespace(

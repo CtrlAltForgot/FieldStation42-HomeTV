@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -215,12 +216,12 @@ class HLSSessionManager:
         self.idle_seconds = int(
             idle_seconds
             or os.environ.get("FS42_HLS_IDLE_SECONDS")
-            or conf.get("hls_idle_seconds", 90)
+            or conf.get("hls_idle_seconds", 30)
         )
         self.max_sessions = int(
             max_sessions
             or os.environ.get("FS42_HLS_MAX_SESSIONS")
-            or conf.get("hls_max_sessions", 8)
+            or conf.get("hls_max_sessions", 4)
         )
         self.process_factory = process_factory
         self.sessions: dict[str, StreamSession] = {}
@@ -247,12 +248,11 @@ class HLSSessionManager:
             session_id = str(uuid.uuid4())
             directory = self.root / session_id
             directory.mkdir(mode=0o700)
-            subtitle = (
-                self._english_subtitle(airing.media_path)
-                if profile == "auto"
-                else None
+            streams = self._probe_streams(airing.media_path) if profile == "auto" else []
+            subtitle = self._select_english_subtitle(streams)
+            command = self._ffmpeg_command(
+                airing, profile, directory, subtitle, streams
             )
-            command = self._ffmpeg_command(airing, profile, directory, subtitle)
             LOG.info(
                 "Starting HLS session %s for channel %s at %.3fs (%s)",
                 session_id,
@@ -280,8 +280,7 @@ class HLSSessionManager:
             return session, airing
 
     @staticmethod
-    def _english_subtitle(media_path: str) -> tuple[str, int] | None:
-        """Select an English subtitle only for explicitly non-English audio."""
+    def _probe_streams(media_path: str) -> list[dict]:
         try:
             result = subprocess.run(
                 [
@@ -301,9 +300,13 @@ class HLSSessionManager:
             )
             streams = __import__("json").loads(result.stdout).get("streams", [])
         except Exception as exc:
-            LOG.warning("Could not inspect subtitle languages for %s: %s", media_path, exc)
-            return None
+            LOG.warning("Could not inspect media streams for %s: %s", media_path, exc)
+            return []
+        return streams
 
+    @staticmethod
+    def _select_english_subtitle(streams: list[dict]) -> tuple[str, int] | None:
+        """Select an English subtitle only for explicitly non-English audio."""
         audio = next(
             (stream for stream in streams if stream.get("codec_type") == "audio"),
             None,
@@ -324,11 +327,28 @@ class HLSSessionManager:
         return None
 
     @staticmethod
+    def _english_subtitle(media_path: str) -> tuple[str, int] | None:
+        return HLSSessionManager._select_english_subtitle(
+            HLSSessionManager._probe_streams(media_path)
+        )
+
+    @staticmethod
+    def _transcode_threads() -> int:
+        try:
+            threads = int(os.environ.get("FS42_HLS_TRANSCODE_THREADS", "2"))
+        except ValueError as exc:
+            raise ValueError("FS42_HLS_TRANSCODE_THREADS must be an integer") from exc
+        if not 1 <= threads <= 8:
+            raise ValueError("FS42_HLS_TRANSCODE_THREADS must be between 1 and 8")
+        return threads
+
+    @staticmethod
     def _ffmpeg_command(
         airing: Airing,
         profile: str,
         directory: Path,
         subtitle: tuple[str, int] | None = None,
+        streams: list[dict] | None = None,
     ) -> list[str]:
         command = [
             os.environ.get("FS42_FFMPEG", "ffmpeg"),
@@ -347,6 +367,17 @@ class HLSSessionManager:
         if profile == "copy":
             command += ["-c", "copy"]
         else:
+            streams = streams or []
+            video = next(
+                (stream for stream in streams if stream.get("codec_type") == "video"),
+                {},
+            )
+            audio = next(
+                (stream for stream in streams if stream.get("codec_type") == "audio"),
+                {},
+            )
+            copy_video = video.get("codec_name") == "h264" and subtitle is None
+            copy_audio = audio.get("codec_name") == "aac"
             video_map = "0:v:0"
             video_filter = []
             if subtitle:
@@ -367,27 +398,28 @@ class HLSSessionManager:
                         "-vf",
                         f"subtitles='{escaped_path}':si={subtitle_index}",
                     ]
-            command += [
-                "-map",
-                video_map,
-                "-map",
-                "0:a:0?",
-                *video_filter,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-tune",
-                "zerolatency",
-                "-pix_fmt",
-                "yuv420p",
-                "-force_key_frames",
-                "expr:gte(t,n_forced*2)",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "160k",
-            ]
+            command += ["-map", video_map, "-map", "0:a:0?", *video_filter]
+            if copy_video:
+                command += ["-c:v", "copy"]
+            else:
+                command += [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-tune",
+                    "zerolatency",
+                    "-threads:v",
+                    str(HLSSessionManager._transcode_threads()),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-force_key_frames",
+                    "expr:gte(t,n_forced*2)",
+                ]
+            if copy_audio:
+                command += ["-c:a", "copy"]
+            else:
+                command += ["-c:a", "aac", "-b:a", "160k"]
         command += [
             "-f",
             "hls",
@@ -447,11 +479,41 @@ class HLSSessionManager:
 
     @staticmethod
     def _stop(session: StreamSession) -> None:
-        if session.process.poll() is None:
-            session.process.terminate()
+        process = session.process
+        if process.poll() is None:
+            HLSSessionManager._signal_process(process, signal.SIGTERM)
             try:
-                session.process.wait(timeout=3)
+                process.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                session.process.kill()
-                session.process.wait(timeout=2)
+                HLSSessionManager._signal_process(process, signal.SIGKILL)
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    LOG.error(
+                        "FFmpeg process %s did not exit after SIGKILL",
+                        getattr(process, "pid", "unknown"),
+                    )
+        # FFmpeg is its process-group leader. Kill any helper processes that
+        # survived after the leader exited before removing the session.
+        HLSSessionManager._signal_process(process, signal.SIGKILL, fallback=False)
         shutil.rmtree(session.directory, ignore_errors=True)
+
+    @staticmethod
+    def _signal_process(
+        process: subprocess.Popen, sig: signal.Signals, fallback: bool = True
+    ) -> None:
+        pid = getattr(process, "pid", None)
+        if pid is not None and hasattr(os, "killpg"):
+            try:
+                os.killpg(pid, sig)
+                return
+            except ProcessLookupError:
+                return
+            except OSError as exc:
+                LOG.warning("Could not signal FFmpeg process group %s: %s", pid, exc)
+        if not fallback or process.poll() is not None:
+            return
+        if sig == signal.SIGKILL:
+            process.kill()
+        else:
+            process.terminate()

@@ -667,36 +667,45 @@ class MediaProcessor:
                 window_seconds * 2,
                 base_duration - window_start,
             )
-            result = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-hide_banner",
-                    "-nostdin",
-                    "-loglevel",
-                    "info",
-                    "-threads",
-                    str(scan_threads),
-                    "-filter_threads",
-                    str(scan_threads),
-                    "-ss",
-                    f"{window_start:.3f}",
-                    "-i",
+            try:
+                result = subprocess.run(
+                    [
+                        os.environ.get("FS42_FFMPEG", "ffmpeg"),
+                        "-hide_banner",
+                        "-nostdin",
+                        "-loglevel",
+                        "info",
+                        "-threads",
+                        str(scan_threads),
+                        "-filter_threads",
+                        str(scan_threads),
+                        "-ss",
+                        f"{window_start:.3f}",
+                        "-i",
+                        fname,
+                        "-t",
+                        f"{window_duration:.3f}",
+                        "-vf",
+                        (
+                            f"blackdetect=d={black_min_duration}:"
+                            "pix_th=0.1:pic_th=0.95"
+                        ),
+                        "-an",
+                        "-f",
+                        "null",
+                        "-",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                _l.warning(
+                    "Timed out inspecting chapter boundary %.3fs in %s",
+                    boundary,
                     fname,
-                    "-t",
-                    f"{window_duration:.3f}",
-                    "-vf",
-                    (
-                        f"blackdetect=d={black_min_duration}:"
-                        "pix_th=0.1:pic_th=0.95"
-                    ),
-                    "-an",
-                    "-f",
-                    "null",
-                    "-",
-                ],
-                capture_output=True,
-                text=True,
-            )
+                )
+                continue
             for match in pattern.finditer(result.stderr):
                 midpoint = (
                     float(match.group("start")) + float(match.group("end"))

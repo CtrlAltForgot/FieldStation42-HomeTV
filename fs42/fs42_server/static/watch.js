@@ -127,7 +127,9 @@
         Math.max(250, boundaryDelay)
       );
       heartbeat = setInterval(() => {
-        if (sessionId) fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
+        if (sessionId && !document.hidden && !video.paused && !video.ended) {
+          fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
+        }
       }, 20000);
       message.textContent = "";
       localStorage.setItem("fs42-channel", String(channel));
@@ -229,7 +231,14 @@
   video.addEventListener("playing", () => {
     requestAnimationFrame(() => video.classList.remove("switching"));
   });
-  window.addEventListener("beforeunload", stopSession);
+  window.addEventListener("pagehide", stopSession);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopSession();
+    } else if (!sessionId && channelSelect.value) {
+      tune(channelSelect.value);
+    }
+  });
   setInterval(() => {
     if (nowInfo) {
       const elapsed = (Date.now() - Date.parse(nowInfo.server_time)) / 1000 + nowInfo.elapsed;
@@ -238,5 +247,5 @@
   }, 1000);
   setInterval(refreshNow, 15000);
   showControls();
-  start();
+  if (!document.hidden) start();
 })();

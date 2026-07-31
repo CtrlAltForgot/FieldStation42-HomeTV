@@ -31,6 +31,7 @@ async def _lifespan(app):
                 try:
                     msg = _shutdown_queue.get_nowait()
                     if msg == "shutdown":
+                        app.state.hls_sessions.close()
                         os._exit(0)
                 except Exception:
                     pass

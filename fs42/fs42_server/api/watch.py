@@ -113,9 +113,12 @@ async def _serve_asset(session_id: str, asset: str, request: Request):
                 break
             session = manager.get(session_id)
             if session.process.poll() is not None:
+                manager.delete(session_id)
                 raise HTTPException(502, "FFmpeg exited before creating a playlist")
             await asyncio.sleep(0.1)
     if not path.is_file():
+        if asset == "master.m3u8":
+            manager.delete(session_id)
         raise HTTPException(404, "HLS asset is not ready")
     media_type = (
         "application/vnd.apple.mpegurl"

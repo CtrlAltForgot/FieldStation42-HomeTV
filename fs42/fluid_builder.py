@@ -11,7 +11,7 @@ from fs42.station_manager import StationManager
 from fs42.database import connect
 
 class FluidBuilder:
-    COMMERCIAL_BREAK_DETECTOR_VERSION = 2
+    COMMERCIAL_BREAK_DETECTOR_VERSION = 3
 
     def __init__(self, db_path=None):
         if db_path is None:

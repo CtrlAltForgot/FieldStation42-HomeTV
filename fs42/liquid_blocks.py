@@ -110,11 +110,10 @@ class LiquidBlock:
 
         _fluid = FluidBuilder()
 
-        # Prefer chapter markers over black detection
+        # Only use boundaries produced by the conservative commercial-break
+        # detector. Falling back to legacy whole-file black detection here
+        # turns ordinary scene fades into ad breaks.
         break_points = _fluid.get_chapters(self.content.realpath)
-        if not break_points:
-            # Fall back to black detection if no chapters
-            break_points = _fluid.get_breaks(self.content.realpath)
 
         strict_count = None
         if break_points:

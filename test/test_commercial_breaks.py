@@ -11,6 +11,7 @@ from fs42.fluid_statements import FluidStatements
 from fs42.database import connect
 from fs42.media_processor import MediaProcessor
 from fs42.reel_cutter import ReelCutter
+from fs42.liquid_blocks import LiquidBlock
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
@@ -86,6 +87,20 @@ class CommercialBreakSelectionTests(unittest.TestCase):
             MediaProcessor.black_detect_at_chapters(
                 "/media/show.mkv", 1320, chapters
             )
+
+    def test_chapter_window_scan_has_a_hard_timeout(self):
+        chapters = [
+            {"chapter_start": 0, "chapter_end": 300},
+            {"chapter_start": 300, "chapter_end": 1320},
+        ]
+        with patch(
+            "fs42.media_processor.subprocess.run",
+            return_value=SimpleNamespace(stderr=""),
+        ) as run:
+            MediaProcessor.black_detect_at_chapters(
+                "/media/show.mkv", 1320, chapters
+            )
+        self.assertEqual(run.call_args.kwargs["timeout"], 30)
 
     def test_safe_breaks_ignore_opening_credits_and_nearby_black_frames(self):
         detected = [
@@ -191,6 +206,38 @@ class CommercialBreakSelectionTests(unittest.TestCase):
                 ("/bumps/black-2.mkv", 0, 15),
             ],
         )
+
+    def test_schedule_does_not_fall_back_to_legacy_black_frames(self):
+        content = SimpleNamespace(
+            realpath="/media/show.mkv",
+            path="/media/show.mkv",
+            title="Show",
+            duration=1320,
+            content_type="feature",
+            media_type="video",
+        )
+        start = __import__("datetime").datetime(2026, 7, 31, 12, 0)
+        block = LiquidBlock(
+            content,
+            start,
+            start + __import__("datetime").timedelta(seconds=1380),
+            break_info={"break_duration": 30},
+        )
+        catalog = MagicMock()
+        catalog.config = {"break_duration": 30}
+        catalog.make_reel_fill.return_value = []
+        fluid = MagicMock()
+        fluid.get_chapters.return_value = []
+        with (
+            patch("fs42.liquid_blocks.FluidBuilder", return_value=fluid),
+        ):
+            block.make_plan(catalog)
+        fluid.get_breaks.assert_not_called()
+        feature_entries = [
+            entry for entry in block.plan if entry.path == content.path
+        ]
+        self.assertEqual(len(feature_entries), 1)
+        self.assertEqual(feature_entries[0].duration, 1320)
 
     def test_black_bumpers_are_not_analyzed_as_feature_breaks(self):
         builder = FluidBuilder.__new__(FluidBuilder)
