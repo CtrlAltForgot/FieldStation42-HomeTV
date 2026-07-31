@@ -173,7 +173,9 @@
       nowInfo = result.now;
       renderNow();
       const playbackStarted = await attach(result.playlist_url, signal);
-      const boundaryDelay = Date.parse(nowInfo.item_end) - Date.now() + 250;
+      // The server is authoritative for broadcast timing. Device clocks on
+      // TVs are often skewed and must never shorten a scheduled commercial.
+      const boundaryDelay = Number(nowInfo.item_remaining) * 1000 + 250;
       boundaryTimer = setTimeout(
         () => {
           // Preserve every scheduled frame. The transition begins only after

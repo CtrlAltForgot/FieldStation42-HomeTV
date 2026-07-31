@@ -59,6 +59,7 @@ class Airing:
 
     def public_dict(self, now: dt.datetime) -> dict:
         elapsed = max(0.0, min((now - self.start).total_seconds(), self.duration))
+        item_remaining = max(0.0, (self.item_end - now).total_seconds())
         return {
             "channel_number": self.channel_number,
             "channel_name": self.channel_name,
@@ -67,6 +68,7 @@ class Airing:
             "start": self.start.isoformat(),
             "end": self.end.isoformat(),
             "item_end": self.item_end.isoformat(),
+            "item_remaining": item_remaining,
             "duration": self.duration,
             "elapsed": elapsed,
             "progress": elapsed / self.duration if self.duration > 0 else 0,

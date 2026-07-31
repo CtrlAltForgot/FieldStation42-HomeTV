@@ -95,6 +95,12 @@ class ResolverTests(unittest.TestCase):
                 airing.public_dict(start + dt.timedelta(seconds=150))["item_end"],
                 (start + dt.timedelta(seconds=600)).isoformat(),
             )
+            self.assertEqual(
+                airing.public_dict(
+                    start + dt.timedelta(seconds=150)
+                )["item_remaining"],
+                450,
+            )
 
     def test_channel_name_and_number_select_same_station(self):
         resolver = ScheduleResolver(FakeManager())
