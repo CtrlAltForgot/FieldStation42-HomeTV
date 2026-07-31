@@ -178,6 +178,10 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "Game of Thrones")
 
+    def test_truncated_multi_item_schedule_title_is_canonicalized(self):
+        display = program_display("/media/realm-playlist", "Game of")
+        self.assertEqual(display["display_title"], "Game of Thrones")
+
     def test_el_camino_movie_uses_official_colon(self):
         display = _movie_display(
             "/media/Movies/El Camino a Breaking Bad Movie (2019).mkv"

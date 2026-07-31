@@ -28,6 +28,9 @@ TRAILING_NOTE_RE = re.compile(
     re.IGNORECASE,
 )
 TITLE_ALIASES = {
+    # Legacy/custom title patterns can truncate this series before the final
+    # word, especially for multi-item blocks that have no single media path.
+    "game of": "Game of Thrones",
     "game of thrones": "Game of Thrones",
     "schoolhouse rock": "Schoolhouse Rock",
     "shingeki no kyojin": "Attack on Titan",
