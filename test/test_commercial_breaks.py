@@ -1,15 +1,77 @@
 import logging
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from fs42.block_plan import BlockPlanEntry
 from fs42.fluid_builder import FluidBuilder
+from fs42.fluid_statements import FluidStatements
+from fs42.database import connect
 from fs42.media_processor import MediaProcessor
 from fs42.reel_cutter import ReelCutter
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
+    def test_commercial_scan_cache_validates_file_identity_and_version(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            connection = connect(str(Path(temp_dir) / "cache.db"))
+            try:
+                FluidStatements.init_db(connection)
+                connection.commit()
+                points = [{"chapter_start": 0, "chapter_end": 1320}]
+                FluidStatements.add_commercial_break_scan(
+                    connection, "/media/show.mkv", 2, 1234, 5678, points
+                )
+                connection.commit()
+                self.assertEqual(
+                    FluidStatements.get_commercial_break_scan(
+                        connection, "/media/show.mkv", 2, 1234, 5678
+                    ),
+                    points,
+                )
+                self.assertIsNone(
+                    FluidStatements.get_commercial_break_scan(
+                        connection, "/media/show.mkv", 2, 1235, 5678
+                    )
+                )
+                self.assertIsNone(
+                    FluidStatements.get_commercial_break_scan(
+                        connection, "/media/show.mkv", 3, 1234, 5678
+                    )
+                )
+            finally:
+                connection.close()
+
+    def test_black_detection_decodes_only_chapter_windows(self):
+        chapters = [
+            {"chapter_start": 0, "chapter_end": 300},
+            {"chapter_start": 300, "chapter_end": 700},
+            {"chapter_start": 700, "chapter_end": 1320},
+        ]
+        result = SimpleNamespace(
+            stderr=(
+                "[blackdetect] black_start:4.5 black_end:5.5 "
+                "black_duration:1.0\n"
+            )
+        )
+        with patch(
+            "fs42.media_processor.subprocess.run", return_value=result
+        ) as run:
+            segments = MediaProcessor.black_detect_at_chapters(
+                "/media/show.mkv", 1320, chapters
+            )
+
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            command = call.args[0]
+            self.assertEqual(command[command.index("-t") + 1], "10.000")
+        self.assertEqual(
+            [(item["chapter_start"], item["chapter_end"]) for item in segments],
+            [(0.0, 300.0), (300.0, 700.0), (700.0, 1320.0)],
+        )
+
     def test_safe_breaks_ignore_opening_credits_and_nearby_black_frames(self):
         detected = [
             {"chapter_start": 0, "chapter_end": 30},
@@ -140,6 +202,42 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         black_detect.assert_not_called()
         chapter_detect.assert_not_called()
         store.assert_called_once_with(connection, bumper.realpath, [])
+
+    def test_unchanged_feature_reuses_cached_commercial_boundaries(self):
+        builder = FluidBuilder.__new__(FluidBuilder)
+        builder.db_path = "unused.db"
+        builder._l = logging.getLogger("test")
+        connection = MagicMock()
+        cached = [
+            {"chapter_start": 0, "chapter_end": 600},
+            {"chapter_start": 600, "chapter_end": 1320},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "show.mkv"
+            media.touch()
+            feature = SimpleNamespace(
+                realpath=str(media),
+                duration=1320,
+                content_type="feature",
+            )
+            with (
+                patch("fs42.fluid_builder.connect", return_value=connection),
+                patch(
+                    "fs42.fluid_builder.FluidStatements."
+                    "get_commercial_break_scan",
+                    return_value=cached,
+                ),
+                patch.object(MediaProcessor, "black_detect_at_chapters") as black,
+                patch.object(MediaProcessor, "chapter_detect") as chapters,
+                patch(
+                    "fs42.fluid_builder.FluidStatements.add_chapter_points"
+                ) as store,
+            ):
+                builder.scan_chapters_for_entries([feature])
+
+        black.assert_not_called()
+        chapters.assert_not_called()
+        store.assert_called_once_with(connection, feature.realpath, cached)
 
 
 if __name__ == "__main__":

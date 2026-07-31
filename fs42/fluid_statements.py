@@ -217,6 +217,50 @@ class FluidStatements:
         connection.commit()
 
     @staticmethod
+    def get_commercial_break_scan(
+        connection: sqlite3.Connection,
+        path: str,
+        detector_version: int,
+        file_size: int,
+        file_mtime_ns: int,
+    ):
+        row = connection.execute(
+            """
+            SELECT points FROM commercial_break_scans
+            WHERE path=? AND detector_version=? AND file_size=?
+              AND file_mtime_ns=?
+            """,
+            (path, detector_version, file_size, file_mtime_ns),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    @staticmethod
+    def add_commercial_break_scan(
+        connection: sqlite3.Connection,
+        path: str,
+        detector_version: int,
+        file_size: int,
+        file_mtime_ns: int,
+        points,
+    ):
+        connection.execute(
+            """
+            REPLACE INTO commercial_break_scans
+                (path, detector_version, file_size, file_mtime_ns, points,
+                 last_updated)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                path,
+                detector_version,
+                file_size,
+                file_mtime_ns,
+                json.dumps(points),
+                datetime.datetime.now(),
+            ),
+        )
+
+    @staticmethod
     def init_db(connection: sqlite3.Connection):
         cursor = connection.cursor()
         cursor.execute("""CREATE TABLE IF NOT EXISTS file_meta (
@@ -251,6 +295,16 @@ class FluidStatements:
         cursor.execute("""CREATE TABLE IF NOT EXISTS chapter_points (
                             path TEXT REFERENCES file_meta(path) PRIMARY KEY,
                             points TEXT,
+                            last_updated TIMESTAMP
+                            )
+                       """)
+
+        cursor.execute("""CREATE TABLE IF NOT EXISTS commercial_break_scans (
+                            path TEXT PRIMARY KEY,
+                            detector_version INTEGER NOT NULL,
+                            file_size INTEGER NOT NULL,
+                            file_mtime_ns INTEGER NOT NULL,
+                            points TEXT NOT NULL,
                             last_updated TIMESTAMP
                             )
                        """)

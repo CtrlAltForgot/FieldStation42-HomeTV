@@ -3,6 +3,7 @@ import os
 import glob
 import json
 import re
+import subprocess
 import sys
 
 # Validate ffmpeg-python package
@@ -615,8 +616,105 @@ class MediaProcessor:
         return None
 
     @staticmethod
+    def black_detect_at_chapters(
+        fname,
+        base_duration,
+        chapter_segments,
+        black_min_duration=0.35,
+        window_seconds=5,
+    ):
+        """Inspect only short windows around chapter boundaries.
+
+        Break selection requires chapter alignment, so decoding the rest of
+        the feature cannot add a valid candidate.
+        """
+        if not chapter_segments:
+            return []
+        chapters = MediaProcessor.calc_black_segments(
+            [dict(segment) for segment in chapter_segments],
+            base_duration,
+        )
+        boundaries = sorted(
+            {
+                float(segment["chapter_end"])
+                for segment in chapters[:-1]
+                if timings.MIN_2
+                <= float(segment["chapter_end"])
+                <= base_duration - timings.MIN_2
+            }
+        )
+        _l = logging.getLogger("MEDIA")
+        _l.info(
+            "Inspecting %s chapter windows (up to %.0fs decoded, %.0fs total)",
+            len(boundaries),
+            len(boundaries) * window_seconds * 2,
+            base_duration,
+        )
+        detected = []
+        pattern = re.compile(
+            r"black_start:(?P<start>[0-9.]+).*?"
+            r"black_end:(?P<end>[0-9.]+)"
+        )
+        for boundary in boundaries:
+            window_start = max(0.0, boundary - window_seconds)
+            window_duration = min(
+                window_seconds * 2,
+                base_duration - window_start,
+            )
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-nostdin",
+                    "-loglevel",
+                    "info",
+                    "-ss",
+                    f"{window_start:.3f}",
+                    "-i",
+                    fname,
+                    "-t",
+                    f"{window_duration:.3f}",
+                    "-vf",
+                    (
+                        f"blackdetect=d={black_min_duration}:"
+                        "pix_th=0.1:pic_th=0.95"
+                    ),
+                    "-an",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            for match in pattern.finditer(result.stderr):
+                midpoint = (
+                    float(match.group("start")) + float(match.group("end"))
+                ) / 2
+                # Input seeking normally resets timestamps to zero. Handle
+                # builds that retain source timestamps as well.
+                absolute = (
+                    midpoint
+                    if midpoint > window_duration + 1
+                    else window_start + midpoint
+                )
+                if abs(absolute - boundary) <= window_seconds:
+                    detected.append(absolute)
+
+        points = sorted(set(detected))
+        if not points:
+            return []
+        boundaries = [0.0, *points, float(base_duration)]
+        return [
+            {
+                "chapter_start": boundaries[index],
+                "chapter_end": boundaries[index + 1],
+            }
+            for index in range(len(boundaries) - 1)
+        ]
+
+    @staticmethod
     def chapter_detect(fname, base_duration):
-        import subprocess
         import json
 
         _l = logging.getLogger("MEDIA")

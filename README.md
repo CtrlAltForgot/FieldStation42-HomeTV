@@ -46,7 +46,9 @@ and generate one week** (or rebuild, then explicitly reset and regenerate the
 schedule). This replaces legacy scene-chapter break positions, removes
 supplemental movie/TV files from future schedules, and applies canonical
 series/movie identities. Existing schedule rows are intentionally not altered
-silently.
+silently. Commercial analysis seeks only around chapter boundaries and caches
+results for unchanged files, so subsequent rebuilds do not rescan the full
+library.
 
 ## Documentation
 
@@ -94,6 +96,5 @@ If you're getting value from FieldStation42, consider supporting it on [Patreon]
 ## Contributing
 
 Bug reports, feature requests, and pull requests are welcome. Please open an issue before submitting large changes.
-
 
 

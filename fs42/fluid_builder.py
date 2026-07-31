@@ -11,6 +11,8 @@ from fs42.station_manager import StationManager
 from fs42.database import connect
 
 class FluidBuilder:
+    COMMERCIAL_BREAK_DETECTOR_VERSION = 2
+
     def __init__(self, db_path=None):
         if db_path is None:
             self.db_path = StationManager().server_conf["db_path"]
@@ -146,28 +148,63 @@ class FluidBuilder:
         """
         connection = connect(self.db_path)
         try:
-            for entry in entries:
+            total = len(entries)
+            for index, entry in enumerate(entries, start=1):
                 if hasattr(entry, 'realpath') and entry.realpath:
-                    # Recompute on rebuild so legacy generic chapter rows are
-                    # replaced by the safer detector.
+                    # Bumps are never analyzed. Feature scans below reuse only
+                    # results from this detector version and exact file state.
                     if getattr(entry, "content_type", "feature") != "feature":
                         FluidStatements.add_chapter_points(
                             connection, entry.realpath, []
                         )
                         continue
-                    black_segments = MediaProcessor.black_detect(
+                    stat = os.stat(entry.realpath)
+                    cached = FluidStatements.get_commercial_break_scan(
+                        connection,
                         entry.realpath,
-                        entry.duration,
-                        black_min_duration=0.35,
+                        self.COMMERCIAL_BREAK_DETECTOR_VERSION,
+                        stat.st_size,
+                        stat.st_mtime_ns,
+                    )
+                    if cached is not None:
+                        FluidStatements.add_chapter_points(
+                            connection, entry.realpath, cached
+                        )
+                        self._l.info(
+                            "Commercial boundaries %s/%s cached: %s",
+                            index,
+                            total,
+                            entry.realpath,
+                        )
+                        continue
+                    self._l.info(
+                        "Commercial boundaries %s/%s scanning: %s",
+                        index,
+                        total,
+                        entry.realpath,
                     )
                     chapter_segments = MediaProcessor.chapter_detect(
                         entry.realpath,
                         entry.duration,
                     )
+                    black_segments = MediaProcessor.black_detect_at_chapters(
+                        entry.realpath,
+                        entry.duration,
+                        chapter_segments,
+                        black_min_duration=0.35,
+                    )
                     safe_segments = MediaProcessor.safe_commercial_segments(
                         black_segments,
                         entry.duration,
                         chapter_segments,
+                    )
+                    FluidStatements.add_commercial_break_scan(
+                        connection,
+                        entry.realpath,
+                        self.COMMERCIAL_BREAK_DETECTOR_VERSION,
+                        stat.st_size,
+                        stat.st_mtime_ns,
+                        safe_segments,
                     )
                     FluidStatements.add_chapter_points(
                         connection, entry.realpath, safe_segments

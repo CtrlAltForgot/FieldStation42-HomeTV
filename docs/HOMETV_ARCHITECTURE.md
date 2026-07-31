@@ -47,6 +47,13 @@ at least three minutes apart. If no trustworthy boundary remains, the feature
 is not cut and its filler is placed after it. Commercial and bump content is
 never analyzed for black frames, trimmed, or shortened.
 
+The detector does not decode whole features. FFprobe first reads the embedded
+chapter table, then FFmpeg inspects only a ten-second window centered on each
+eligible boundary. Results are cached in `commercial_break_scans` using the
+canonical path, file size, nanosecond modification time, and detector version.
+Unchanged files reuse that cache on subsequent rebuilds; new, changed, or
+detector-version-invalidated files alone are inspected.
+
 For a request at time `now`, Home TV selects the row satisfying
 `start_time <= now < end_time`. It then walks the ordered plan from the block
 start until it finds the item containing `now`.
