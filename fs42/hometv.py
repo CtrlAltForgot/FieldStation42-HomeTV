@@ -522,7 +522,7 @@ class HLSSessionManager:
                     )
                 command += [
                     "-pix_fmt", "yuv420p",
-                    "-force_key_frames", "expr:gte(t,n_forced*2)",
+                    "-force_key_frames", "expr:gte(t,n_forced*1)",
                 ]
             if copy_audio:
                 command += ["-c:a", "copy"]
@@ -541,11 +541,11 @@ class HLSSessionManager:
             "-f",
             "hls",
             "-hls_time",
-            "2",
+            "1",
             "-hls_list_size",
-            "30",
+            "60",
             "-hls_delete_threshold",
-            "6",
+            "10",
             "-hls_flags",
             "delete_segments+independent_segments+omit_endlist+temp_file",
             "-hls_segment_filename",

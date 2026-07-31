@@ -4,7 +4,8 @@
   const message = document.querySelector("#message");
   const progress = document.querySelector("#progress span");
   let channels = [], sessionId = null, hls = null, nowInfo = null;
-  let recoveryTimer = null, controlsTimer = null, heartbeat = null;
+  let recoveryTimer = null, hlsRecoveryTimer = null;
+  let controlsTimer = null, heartbeat = null;
   let boundaryTimer = null, boundaryFadeTimer = null;
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
@@ -53,6 +54,7 @@
 
   async function stopSession() {
     clearInterval(heartbeat);
+    clearTimeout(hlsRecoveryTimer);
     clearTimeout(boundaryTimer);
     clearTimeout(boundaryFadeTimer);
     if (hls) { hls.destroy(); hls = null; }
@@ -74,8 +76,8 @@
     // reserve native HLS for Safari and other browsers without MSE support.
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({
-        liveSyncDurationCount: 6,
-        liveMaxLatencyDurationCount: 18,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 12,
         maxLiveSyncPlaybackRate: 1.15,
         maxBufferLength: 60,
         maxMaxBufferLength: 90,
@@ -99,6 +101,7 @@
           resolve();
         });
         hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          clearTimeout(hlsRecoveryTimer);
           hlsNetworkRecoveries = 0;
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -120,6 +123,14 @@
             hlsNetworkRecoveries += 1;
             message.textContent = "Stream delayed — resuming…";
             hls.startLoad();
+            clearTimeout(hlsRecoveryTimer);
+            hlsRecoveryTimer = setTimeout(() => {
+              reportClientEvent(
+                "network-recovery-timeout",
+                "No fragment buffered within 6 seconds"
+              );
+              if (channelSelect.value) tune(channelSelect.value);
+            }, 6000);
           } else if (
             data.type === Hls.ErrorTypes.MEDIA_ERROR &&
             hlsMediaRecoveries < 2
@@ -289,6 +300,7 @@
     recover();
   });
   video.addEventListener("playing", () => {
+    clearTimeout(hlsRecoveryTimer);
     recoveryAttempts = 0;
     hlsNetworkRecoveries = 0;
     hlsMediaRecoveries = 0;

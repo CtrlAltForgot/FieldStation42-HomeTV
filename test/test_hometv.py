@@ -269,7 +269,13 @@ class SessionTests(unittest.TestCase):
                 processes[0].command[
                     processes[0].command.index("-hls_list_size") + 1
                 ],
-                "30",
+                "60",
+            )
+            self.assertEqual(
+                processes[0].command[
+                    processes[0].command.index("-hls_time") + 1
+                ],
+                "1",
             )
             self.assertEqual(
                 processes[0].command[processes[0].command.index("-ss") + 1],
