@@ -526,7 +526,7 @@ class ShowCatalog:
             for candidate in candidates:
                 # restrict content to fit and be valid (zero duration is likely not valid)
                 if (
-                    seconds > candidate.duration >= 1
+                    seconds >= candidate.duration >= 1
                         and MediaProcessor._test_candidate_hints(candidate.hints, when)
                 ):
                     # skip if a sibling channel is already playing this file in an
@@ -558,7 +558,7 @@ class ShowCatalog:
         """Helper to merge coming-up-next bump folder candidates into an existing pool if the key exists."""
         if key in self.clip_index:
             extras = [c for c in self.clip_index[key]
-                      if c.duration < seconds and c.duration >= 1
+                      if c.duration <= seconds and c.duration >= 1
                       and MediaProcessor._test_candidate_hints(c.hints, when)]
             candidates += extras
         return candidates
@@ -585,7 +585,7 @@ class ShowCatalog:
 
         # build candidate pool from normal bumps
         candidates = [c for c in self.clip_index[base_tag]
-                      if c.duration < seconds and c.duration >= 1
+                      if c.duration <= seconds and c.duration >= 1
                       and MediaProcessor._test_candidate_hints(c.hints, when)]
 
 
@@ -713,7 +713,7 @@ class ShowCatalog:
                     f"Could not find matching content for {remaining} seconds - will attempt to fill with BRB"
                 )
 
-            if block and (remaining - block.duration) > 0:
+            if block and (remaining - block.duration) >= 0:
                 remaining -= block.duration
                 blocks.append(block)
 

@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from fs42.block_plan import BlockPlanEntry
+from fs42.catalog import ShowCatalog
+from fs42.catalog_entry import CatalogEntry
 from fs42.fluid_builder import FluidBuilder
 from fs42.fluid_statements import FluidStatements
 from fs42.database import connect
@@ -15,6 +17,30 @@ from fs42.liquid_blocks import LiquidBlock
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
+    def test_exact_length_commercial_fills_gap_without_dead_air(self):
+        catalog = ShowCatalog.__new__(ShowCatalog)
+        exact = CatalogEntry("/ads/exact.mkv", 30, "commercials")
+        catalog.clip_index = {"commercials": [exact]}
+        catalog.config = {}
+
+        selected = catalog.find_candidate(
+            "commercials", 30, __import__("datetime").datetime.now()
+        )
+
+        self.assertIs(selected, exact)
+
+    def test_exact_length_bumper_fills_gap_without_dead_air(self):
+        catalog = ShowCatalog.__new__(ShowCatalog)
+        exact = CatalogEntry("/bumps/exact.mkv", 10, "bumps")
+        catalog.clip_index = {"bumps": [exact]}
+        catalog.config = {}
+
+        selected = catalog.find_bump(
+            10, __import__("datetime").datetime.now(), bump_tag="bumps"
+        )
+
+        self.assertIs(selected, exact)
+
     def test_current_detector_invalidates_pre_optimization_cache(self):
         self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 7)
 

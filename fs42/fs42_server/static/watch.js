@@ -6,14 +6,13 @@
   let channels = [], sessionId = null, hls = null, nowInfo = null;
   let recoveryTimer = null, hlsRecoveryTimer = null;
   let controlsTimer = null, heartbeat = null;
-  let boundaryTimer = null, boundaryFadeTimer = null;
+  let boundaryTimer = null;
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
   let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
   let userMuted = localStorage.getItem("fs42-muted") === "true";
   const savedVolumeValue = localStorage.getItem("fs42-volume");
   const savedVolume = savedVolumeValue === null ? 1 : Number(savedVolumeValue);
-  const TRANSITION_MS = 450;
 
   const showControls = () => {
     document.body.classList.add("active");
@@ -66,14 +65,13 @@
     }
   }
 
-  async function stopSession() {
+  async function stopSession({clearVideo = true} = {}) {
     clearInterval(heartbeat);
     clearTimeout(hlsRecoveryTimer);
     clearTimeout(boundaryTimer);
-    clearTimeout(boundaryFadeTimer);
     if (hls) { hls.destroy(); hls = null; }
     video.pause();
-    video.removeAttribute("src");
+    if (clearVideo) video.removeAttribute("src");
     if (sessionId) {
       const old = sessionId; sessionId = null;
       await fetch(
@@ -170,12 +168,7 @@
   function transitionAfterPlayback() {
     if (isTuning || !channelSelect.value) return;
     clearTimeout(boundaryTimer);
-    clearTimeout(boundaryFadeTimer);
-    video.classList.add("switching");
-    boundaryFadeTimer = setTimeout(
-      () => tune(channelSelect.value, {boundary: true}),
-      TRANSITION_MS
-    );
+    tune(channelSelect.value, {boundary: true});
   }
 
   async function tune(channel, {boundary = false} = {}) {
@@ -183,10 +176,10 @@
     tuneAbort = new AbortController();
     const signal = tuneAbort.signal;
     isTuning = true;
-    video.classList.add("switching");
+    if (!boundary) video.classList.add("switching");
     clearTimeout(recoveryTimer);
     message.textContent = boundary ? "" : "Tuning…";
-    await stopSession();
+    await stopSession({clearVideo: !boundary});
     try {
       const result = await api("/api/watch/sessions", {
         method: "POST",
