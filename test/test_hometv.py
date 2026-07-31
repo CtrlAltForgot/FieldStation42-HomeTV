@@ -275,6 +275,10 @@ class SessionTests(unittest.TestCase):
             self.assertIn("-re", processes[0].command)
             self.assertIn("-t", processes[0].command)
             self.assertIn("-force_key_frames", processes[0].command)
+            hls_flags = processes[0].command[
+                processes[0].command.index("-hls_flags") + 1
+            ]
+            self.assertNotIn("omit_endlist", hls_flags)
             self.assertEqual(
                 processes[0].command[
                     processes[0].command.index("-hls_list_size") + 1

@@ -549,7 +549,7 @@ class HLSSessionManager:
             "-hls_delete_threshold",
             "10",
             "-hls_flags",
-            "delete_segments+independent_segments+omit_endlist+temp_file",
+            "delete_segments+independent_segments+temp_file",
             "-hls_segment_filename",
             str(directory / "stream%05d.ts"),
             str(directory / "master.m3u8"),

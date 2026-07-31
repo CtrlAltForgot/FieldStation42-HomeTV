@@ -153,6 +153,17 @@
     return requestPlayback();
   }
 
+  function transitionAfterPlayback() {
+    if (isTuning || !channelSelect.value) return;
+    clearTimeout(boundaryTimer);
+    clearTimeout(boundaryFadeTimer);
+    video.classList.add("switching");
+    boundaryFadeTimer = setTimeout(
+      () => tune(channelSelect.value, {boundary: true}),
+      TRANSITION_MS
+    );
+  }
+
   async function tune(channel, {boundary = false} = {}) {
     if (tuneAbort) tuneAbort.abort();
     tuneAbort = new AbortController();
@@ -173,19 +184,17 @@
       nowInfo = result.now;
       renderNow();
       const playbackStarted = await attach(result.playlist_url, signal);
-      // The server is authoritative for broadcast timing. Device clocks on
-      // TVs are often skewed and must never shorten a scheduled commercial.
-      const boundaryDelay = Number(nowInfo.item_remaining) * 1000 + 250;
+      // Playback completion, not wall time, owns item transitions. This late
+      // watchdog only recovers a browser that never emits `ended`; it can
+      // never truncate buffered commercial frames.
+      const boundaryDelay = Number(nowInfo.item_remaining) * 1000 + 30000;
       boundaryTimer = setTimeout(
         () => {
-          // Preserve every scheduled frame. The transition begins only after
-          // the item boundary, then holds black while the next item becomes
-          // playable.
-          video.classList.add("switching");
-          boundaryFadeTimer = setTimeout(
-            () => tune(channelSelect.value, {boundary: true}),
-            TRANSITION_MS
+          reportClientEvent(
+            "item-end-watchdog",
+            "Video did not end within 30 seconds of scheduled completion"
           );
+          transitionAfterPlayback();
         },
         Math.max(250, boundaryDelay)
       );
@@ -309,6 +318,7 @@
     message.textContent = "";
     requestAnimationFrame(() => video.classList.remove("switching"));
   });
+  video.addEventListener("ended", transitionAfterPlayback);
   window.addEventListener("pagehide", stopSession);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
