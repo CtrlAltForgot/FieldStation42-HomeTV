@@ -254,12 +254,21 @@ class HLSSessionManager:
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
 
-    def create(self, channel: str, profile: str = "auto") -> tuple[StreamSession, Airing]:
+    def create(
+        self,
+        channel: str,
+        profile: str = "auto",
+        boundary_at: dt.datetime | None = None,
+    ) -> tuple[StreamSession, Airing]:
         if profile not in self.PROFILES:
             raise ValueError(f"Unknown client profile: {profile}")
         with self.lock:
             self.cleanup()
-            airing = self.resolver.now(channel)
+            airing = (
+                self.resolver.now(channel, boundary_at)
+                if boundary_at is not None
+                else self.resolver.now(channel)
+            )
             key = (airing.channel_number, profile)
             broadcast = self.broadcasts.get(key)
             if broadcast is not None and (

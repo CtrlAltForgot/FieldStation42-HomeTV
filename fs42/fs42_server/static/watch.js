@@ -178,6 +178,7 @@
     tuneAbort = new AbortController();
     const signal = tuneAbort.signal;
     isTuning = true;
+    const boundaryAt = boundary ? nowInfo?.item_end : null;
     if (!boundary) video.classList.add("switching");
     clearTimeout(recoveryTimer);
     message.textContent = boundary ? "" : "Tuning…";
@@ -186,7 +187,11 @@
       const result = await api("/api/watch/sessions", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({channel: String(channel), profile: "auto"}),
+        body: JSON.stringify({
+          channel: String(channel),
+          profile: "auto",
+          boundary_at: boundaryAt
+        }),
         signal
       });
       sessionId = result.session_id;

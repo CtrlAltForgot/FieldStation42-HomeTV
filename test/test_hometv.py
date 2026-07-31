@@ -468,6 +468,36 @@ class SessionTests(unittest.TestCase):
             self.assertIs(manager.get(second.session_id).process, processes[0])
             manager.close()
 
+    def test_automatic_boundary_resolves_exact_next_item_start(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "commercial.mkv"
+            media.touch()
+            boundary = dt.datetime(2026, 7, 31, 18, 30)
+            airing = Airing(
+                "42", "Test TV", "Show", "Commercial", boundary,
+                boundary + dt.timedelta(seconds=30), boundary,
+                boundary + dt.timedelta(seconds=30), str(media), 0, 30, 30,
+                content_type="commercial",
+            )
+            calls = []
+
+            def resolve(channel, when):
+                calls.append((channel, when))
+                return airing
+
+            manager = HLSSessionManager(
+                resolver=SimpleNamespace(now=resolve),
+                root=Path(temp_dir) / "hls",
+                process_factory=lambda command, **_kwargs: FakeProcess(command),
+            )
+            session, selected = manager.create("42", boundary_at=boundary)
+
+            self.assertEqual(calls, [("42", boundary)])
+            self.assertEqual(selected.offset, 0)
+            self.assertEqual(selected.remaining, 30)
+            manager.delete(session.session_id)
+            manager.close()
+
     def test_channel_limit_evicts_unused_broadcast_for_rapid_tuning(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

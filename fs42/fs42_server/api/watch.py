@@ -1,4 +1,5 @@
 import asyncio
+import datetime as dt
 import logging
 from pathlib import Path
 
@@ -26,6 +27,7 @@ PLAYLIST_READY_ATTEMPTS = 300
 class SessionRequest(BaseModel):
     channel: str
     profile: str = "auto"
+    boundary_at: dt.datetime | None = None
 
 
 class ClientEvent(BaseModel):
@@ -103,7 +105,16 @@ async def create_session(body: SessionRequest, request: Request):
     session = None
     try:
         manager = _manager(request)
-        session, airing = manager.create(body.channel, body.profile)
+        boundary_at = body.boundary_at
+        if boundary_at is not None:
+            now = dt.datetime.now(tz=boundary_at.tzinfo)
+            if abs((now - boundary_at).total_seconds()) > 120:
+                raise ValueError("Playback boundary is outside the live window")
+        session, airing = (
+            manager.create(body.channel, body.profile, boundary_at=boundary_at)
+            if boundary_at is not None
+            else manager.create(body.channel, body.profile)
+        )
         for _ in range(PLAYLIST_READY_ATTEMPTS):
             if await request.is_disconnected():
                 manager.delete(session.session_id)
