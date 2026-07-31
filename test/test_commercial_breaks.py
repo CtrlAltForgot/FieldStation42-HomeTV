@@ -53,7 +53,7 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         ]
         result = SimpleNamespace(
             stderr=(
-                "[blackdetect] black_start:4.5 black_end:5.5 "
+                "[blackdetect] black_start:1.5 black_end:2.5 "
                 "black_duration:1.0\n"
             )
         )
@@ -67,7 +67,7 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         for call in run.call_args_list:
             command = call.args[0]
-            self.assertEqual(command[command.index("-t") + 1], "10.000")
+            self.assertEqual(command[command.index("-t") + 1], "4.000")
             self.assertEqual(command[command.index("-threads") + 1], "1")
             self.assertEqual(command[command.index("-filter_threads") + 1], "1")
         self.assertEqual(
@@ -314,6 +314,52 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         chapters.assert_not_called()
         store.assert_called_once_with(connection, feature.realpath, cached)
         connection.commit.assert_called()
+
+    def test_authored_act_chapters_skip_ffmpeg_analysis(self):
+        builder = FluidBuilder.__new__(FluidBuilder)
+        builder.db_path = "unused.db"
+        builder._l = logging.getLogger("test")
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "show.mkv"
+            media.touch()
+            feature = SimpleNamespace(
+                realpath=str(media),
+                duration=1320,
+                content_type="feature",
+            )
+            chapters = [
+                {"chapter_start": 0, "chapter_end": 300, "title": "Act 1"},
+                {"chapter_start": 300, "chapter_end": 700, "title": "Act 2"},
+                {"chapter_start": 700, "chapter_end": 1320, "title": "Act 3"},
+            ]
+            with (
+                patch("fs42.fluid_builder.connect", return_value=connection),
+                patch(
+                    "fs42.fluid_builder.FluidStatements."
+                    "get_commercial_break_scan",
+                    return_value=None,
+                ),
+                patch.object(
+                    MediaProcessor, "chapter_detect", return_value=chapters
+                ),
+                patch.object(
+                    MediaProcessor, "black_detect_at_chapters"
+                ) as black,
+                patch(
+                    "fs42.fluid_builder.FluidStatements."
+                    "add_commercial_break_scan"
+                ) as store_scan,
+            ):
+                builder.scan_chapters_for_entries([feature])
+
+        black.assert_not_called()
+        stored = store_scan.call_args.args[-1]
+        self.assertEqual(
+            [(item["chapter_start"], item["chapter_end"]) for item in stored],
+            [(0.0, 300.0), (300.0, 700.0), (700.0, 1320.0)],
+        )
 
 
 if __name__ == "__main__":

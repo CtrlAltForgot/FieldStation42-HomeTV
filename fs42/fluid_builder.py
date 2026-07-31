@@ -189,17 +189,24 @@ class FluidBuilder:
                         entry.realpath,
                         entry.duration,
                     )
-                    black_segments = MediaProcessor.black_detect_at_chapters(
-                        entry.realpath,
-                        entry.duration,
-                        chapter_segments,
-                        black_min_duration=0.35,
-                    )
+                    # Explicitly authored act/break chapters are already
+                    # trustworthy and need no video decode. Generic navigation
+                    # chapters still require nearby sustained black evidence.
                     safe_segments = MediaProcessor.safe_commercial_segments(
-                        black_segments,
-                        entry.duration,
-                        chapter_segments,
+                        [], entry.duration, chapter_segments
                     )
+                    if not safe_segments:
+                        black_segments = MediaProcessor.black_detect_at_chapters(
+                            entry.realpath,
+                            entry.duration,
+                            chapter_segments,
+                            black_min_duration=0.35,
+                        )
+                        safe_segments = MediaProcessor.safe_commercial_segments(
+                            black_segments,
+                            entry.duration,
+                            chapter_segments,
+                        )
                     FluidStatements.add_commercial_break_scan(
                         connection,
                         entry.realpath,

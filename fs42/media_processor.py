@@ -622,7 +622,7 @@ class MediaProcessor:
         base_duration,
         chapter_segments,
         black_min_duration=0.35,
-        window_seconds=5,
+        window_seconds=2,
     ):
         """Inspect only short windows around chapter boundaries.
 
