@@ -171,6 +171,22 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "Game of Thrones")
 
+    def test_known_series_path_repairs_truncated_schedule_fallback(self):
+        display = program_display(
+            "/media/Realm/Game of Thrones Collection/episode-01.mkv",
+            "Game of",
+        )
+        self.assertEqual(display["display_title"], "Game of Thrones")
+
+    def test_el_camino_movie_uses_official_colon(self):
+        display = _movie_display(
+            "/media/Movies/El Camino a Breaking Bad Movie (2019).mkv"
+        )
+        self.assertEqual(
+            display["display_title"],
+            "El Camino: a Breaking Bad Movie (2019)",
+        )
+
     def test_clean_program_number_is_not_treated_as_episode_number(self):
         display = program_display(
             "/media/channel-42.mp4", "Channel 42 Live Fixture"

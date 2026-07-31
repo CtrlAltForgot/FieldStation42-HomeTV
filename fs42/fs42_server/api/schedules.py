@@ -100,6 +100,8 @@ def _movie_display(path: str) -> dict:
                 continue
             normalized_title = _natural_title_case(_plain_title(title))
             canonical_title = None
+            if normalized_title.casefold() == "el camino a breaking bad movie":
+                canonical_title = "El Camino: a Breaking Bad Movie"
             star_wars = re.match(
                 r"(?i)^star wars\s+(?:episode\s+)?"
                 r"(?P<episode>[ivxlcdm]+)\s+(?P<subtitle>.+)$",
@@ -225,6 +227,18 @@ def _known_series_episode_display(path: str) -> dict:
     return {}
 
 
+def _known_series_display(path: str) -> dict:
+    """Recover a known series name when a stored schedule title is truncated."""
+    media_path = Path(path)
+    candidates = [media_path.stem, *(parent.name for parent in media_path.parents[:4])]
+    for candidate in candidates:
+        normalized = _plain_title(candidate).casefold()
+        for source, display_title in TITLE_ALIASES.items():
+            if normalized == source or normalized.startswith(source + " "):
+                return {"display_title": display_title}
+    return {}
+
+
 def _supplemental_display(path: str) -> dict:
     parts = Path(path).parts
     for index, part in enumerate(parts):
@@ -255,6 +269,7 @@ def program_display(path: str, fallback: str = "", meta: dict | None = None) -> 
         _episode_display(path, meta)
         or _directory_episode_display(path)
         or _known_series_episode_display(path)
+        or _known_series_display(path)
         or _supplemental_display(path)
         or _movie_display(path)
     )
