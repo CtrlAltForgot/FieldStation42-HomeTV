@@ -15,6 +15,8 @@ from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
+PLAYLIST_STARTUP_ATTEMPTS = 200
+PLAYLIST_STARTUP_INTERVAL = 0.1
 
 
 class SessionRequest(BaseModel):
@@ -108,14 +110,14 @@ async def _serve_asset(session_id: str, asset: str, request: Request):
 
     # FFmpeg startup is asynchronous. Briefly wait for the first playlist.
     if asset == "master.m3u8":
-        for _ in range(40):
+        for _ in range(PLAYLIST_STARTUP_ATTEMPTS):
             if path.is_file():
                 break
             session = manager.get(session_id)
             if session.process.poll() is not None:
                 manager.delete(session_id)
                 raise HTTPException(502, "FFmpeg exited before creating a playlist")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(PLAYLIST_STARTUP_INTERVAL)
     if not path.is_file():
         if asset == "master.m3u8":
             manager.delete(session_id)

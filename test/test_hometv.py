@@ -21,6 +21,8 @@ from fs42.hometv import (
 )
 from fs42.media_processor import MediaProcessor
 from fs42.fs42_server.api.watch import (
+    PLAYLIST_STARTUP_ATTEMPTS,
+    PLAYLIST_STARTUP_INTERVAL,
     SessionRequest,
     _now_payload,
     channels as channel_endpoint,
@@ -217,6 +219,12 @@ class ResolverTests(unittest.TestCase):
 
 
 class SessionTests(unittest.TestCase):
+    def test_playlist_startup_allows_slow_transcodes(self):
+        self.assertGreaterEqual(
+            PLAYLIST_STARTUP_ATTEMPTS * PLAYLIST_STARTUP_INTERVAL,
+            20,
+        )
+
     def test_default_session_limit_is_bounded(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict(

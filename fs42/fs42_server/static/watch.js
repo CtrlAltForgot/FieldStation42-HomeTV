@@ -7,6 +7,7 @@
   let recoveryTimer = null, controlsTimer = null, heartbeat = null;
   let boundaryTimer = null, boundaryFadeTimer = null;
   let isTuning = false, tuneAbort = null;
+  let recoveryAttempts = 0;
   const TRANSITION_MS = 450;
 
   const showControls = () => {
@@ -53,7 +54,7 @@
         let startupComplete = false;
         const timeout = setTimeout(
           () => reject(new Error("HLS manifest did not become ready")),
-          15000
+          30000
         );
         signal.addEventListener("abort", () => {
           clearTimeout(timeout);
@@ -147,11 +148,13 @@
   function recover(force = false) {
     if (isTuning || (!sessionId && !force)) return;
     if (recoveryTimer) return;
-    message.textContent = "Playback interrupted — reconnecting…";
+    const delay = Math.min(30000, 3000 * (2 ** Math.min(recoveryAttempts, 3)));
+    recoveryAttempts += 1;
+    message.textContent = `Playback interrupted — retrying in ${delay / 1000}s…`;
     recoveryTimer = setTimeout(() => {
       recoveryTimer = null;
       if (channelSelect.value) tune(channelSelect.value);
-    }, 3000);
+    }, delay);
   }
 
   function renderNow() {
@@ -229,6 +232,7 @@
     recover();
   });
   video.addEventListener("playing", () => {
+    recoveryAttempts = 0;
     requestAnimationFrame(() => video.classList.remove("switching"));
   });
   window.addEventListener("pagehide", stopSession);
