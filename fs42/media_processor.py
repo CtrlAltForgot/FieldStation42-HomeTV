@@ -1,7 +1,6 @@
 import logging
 import os
 import glob
-import itertools
 import json
 import re
 import subprocess
@@ -529,60 +528,6 @@ class MediaProcessor:
         if not selected:
             return []
 
-        boundaries = [0.0, *selected, float(content_duration)]
-        return [
-            {
-                "chapter_start": boundaries[index],
-                "chapter_end": boundaries[index + 1],
-                "segment_duration": boundaries[index + 1] - boundaries[index],
-            }
-            for index in range(len(boundaries) - 1)
-        ]
-
-    @staticmethod
-    def rigid_commercial_segments(segments, content_duration):
-        """Require a predictable act structure for generic chapter markers.
-
-        A normal half-hour episode needs two verified internal boundaries and
-        an hour episode needs four. Extra safe candidates are reduced to the
-        combination closest to evenly distributed act targets. Missing
-        evidence produces no internal cut rather than a guessed one.
-        """
-        if content_duration < 15 * timings.MIN_1:
-            expected = 1
-        elif content_duration <= 35 * timings.MIN_1:
-            expected = 2
-        elif content_duration <= 65 * timings.MIN_1:
-            expected = 4
-        else:
-            expected = min(
-                6, max(2, round(content_duration / (20 * timings.MIN_1)))
-            )
-
-        normalized = MediaProcessor.calc_black_segments(
-            [dict(segment) for segment in (segments or [])],
-            content_duration,
-        )
-        candidates = sorted(
-            {
-                float(segment["chapter_end"])
-                for segment in normalized[:-1]
-            }
-        )
-        if len(candidates) < expected:
-            return []
-
-        targets = [
-            content_duration * index / (expected + 1)
-            for index in range(1, expected + 1)
-        ]
-        selected = min(
-            itertools.combinations(candidates, expected),
-            key=lambda points: sum(
-                abs(point - target)
-                for point, target in zip(points, targets)
-            ),
-        )
         boundaries = [0.0, *selected, float(content_duration)]
         return [
             {
