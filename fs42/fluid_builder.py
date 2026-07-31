@@ -11,9 +11,8 @@ from fs42.station_manager import StationManager
 from fs42.database import connect
 
 class FluidBuilder:
-    # Version 4 invalidates boundaries generated before the authored-chapter
-    # fast path and tighter generic-boundary validation were introduced.
-    COMMERCIAL_BREAK_DETECTOR_VERSION = 4
+    # Version 5 adds rigid, duration-based act counts for generic chapters.
+    COMMERCIAL_BREAK_DETECTOR_VERSION = 5
 
     def __init__(self, db_path=None):
         if db_path is None:
@@ -208,6 +207,11 @@ class FluidBuilder:
                             black_segments,
                             entry.duration,
                             chapter_segments,
+                        )
+                        safe_segments = (
+                            MediaProcessor.rigid_commercial_segments(
+                                safe_segments, entry.duration
+                            )
                         )
                     FluidStatements.add_commercial_break_scan(
                         connection,

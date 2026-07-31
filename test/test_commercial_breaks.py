@@ -16,7 +16,7 @@ from fs42.liquid_blocks import LiquidBlock
 
 class CommercialBreakSelectionTests(unittest.TestCase):
     def test_current_detector_invalidates_pre_optimization_cache(self):
-        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 4)
+        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 5)
 
     def test_commercial_scan_cache_validates_file_identity_and_version(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -180,6 +180,29 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         self.assertEqual(
             MediaProcessor.safe_commercial_segments(black, 1500, chapters),
             [],
+        )
+
+    def test_half_hour_episode_requires_two_verified_boundaries(self):
+        one_boundary = [
+            {"chapter_start": 0, "chapter_end": 600},
+            {"chapter_start": 600, "chapter_end": 1320},
+        ]
+        self.assertEqual(
+            MediaProcessor.rigid_commercial_segments(one_boundary, 1320),
+            [],
+        )
+
+    def test_half_hour_episode_selects_two_best_distributed_boundaries(self):
+        candidates = [
+            {"chapter_start": 0, "chapter_end": 300},
+            {"chapter_start": 300, "chapter_end": 650},
+            {"chapter_start": 650, "chapter_end": 900},
+            {"chapter_start": 900, "chapter_end": 1320},
+        ]
+        segments = MediaProcessor.rigid_commercial_segments(candidates, 1320)
+        self.assertEqual(
+            [(item["chapter_start"], item["chapter_end"]) for item in segments],
+            [(0.0, 300.0), (300.0, 900.0), (900.0, 1320.0)],
         )
 
     def test_no_safe_boundary_does_not_cut_the_feature(self):
