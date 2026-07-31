@@ -8,6 +8,7 @@
   let boundaryTimer = null, boundaryFadeTimer = null;
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
+  let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
   const TRANSITION_MS = 450;
 
   const showControls = () => {
@@ -47,7 +48,14 @@
     // MPEG-TS playlist. Prefer HLS.js wherever Media Source is available and
     // reserve native HLS for Safari and other browsers without MSE support.
     if (window.Hls && Hls.isSupported()) {
-      hls = new Hls({liveSyncDurationCount: 3, maxLiveSyncPlaybackRate: 1.25});
+      hls = new Hls({
+        liveSyncDurationCount: 6,
+        liveMaxLatencyDurationCount: 18,
+        maxLiveSyncPlaybackRate: 1.15,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 90,
+        backBufferLength: 30
+      });
       hls.loadSource(url);
       hls.attachMedia(video);
       await new Promise((resolve, reject) => {
@@ -65,6 +73,10 @@
           startupComplete = true;
           resolve();
         });
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          hlsNetworkRecoveries = 0;
+          hlsMediaRecoveries = 0;
+        });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data.fatal) return;
           clearTimeout(timeout);
@@ -75,6 +87,20 @@
           });
           if (!startupComplete) {
             reject(new Error(`HLS startup failed: ${data.details || data.type}`));
+          } else if (
+            data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+            hlsNetworkRecoveries < 3
+          ) {
+            hlsNetworkRecoveries += 1;
+            message.textContent = "Stream delayed — resuming…";
+            hls.startLoad();
+          } else if (
+            data.type === Hls.ErrorTypes.MEDIA_ERROR &&
+            hlsMediaRecoveries < 2
+          ) {
+            hlsMediaRecoveries += 1;
+            message.textContent = "Decoder recovering…";
+            hls.recoverMediaError();
           } else {
             recover();
           }
@@ -233,6 +259,9 @@
   });
   video.addEventListener("playing", () => {
     recoveryAttempts = 0;
+    hlsNetworkRecoveries = 0;
+    hlsMediaRecoveries = 0;
+    message.textContent = "";
     requestAnimationFrame(() => video.classList.remove("switching"));
   });
   window.addEventListener("pagehide", stopSession);

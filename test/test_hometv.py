@@ -269,7 +269,7 @@ class SessionTests(unittest.TestCase):
                 processes[0].command[
                     processes[0].command.index("-hls_list_size") + 1
                 ],
-                "12",
+                "30",
             )
             self.assertEqual(
                 processes[0].command[processes[0].command.index("-ss") + 1],
@@ -334,6 +334,26 @@ class SessionTests(unittest.TestCase):
             )
         self.assertIn("h264_nvenc", command)
         self.assertEqual(command[command.index("-maxrate") + 1], "8M")
+
+    def test_auto_profile_normalizes_even_h264_aac_sources(self):
+        when = dt.datetime.now()
+        airing = Airing(
+            "42", "Test TV", "Show", "Episode", when,
+            when + dt.timedelta(minutes=30), when,
+            when + dt.timedelta(minutes=30), "/media/show.mkv", 0, 1800, 1800,
+        )
+        command = HLSSessionManager._ffmpeg_command(
+            airing,
+            "auto",
+            Path("/tmp/hls"),
+            streams=[
+                {"codec_type": "video", "codec_name": "h264"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+        )
+        self.assertIn("libx264", command)
+        self.assertIn("aac", command)
+        self.assertNotIn("copy", command)
 
     def test_session_starts_ffmpeg_in_its_own_process_group(self):
         with tempfile.TemporaryDirectory() as temp_dir:

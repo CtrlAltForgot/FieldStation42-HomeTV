@@ -17,6 +17,8 @@ from fs42.metadata_io import MetadataIO
 router = APIRouter(prefix="/api/watch", tags=["watch"])
 PLAYLIST_STARTUP_ATTEMPTS = 200
 PLAYLIST_STARTUP_INTERVAL = 0.1
+PLAYLIST_READY_SEGMENTS = 3
+PLAYLIST_READY_ATTEMPTS = 300
 
 
 class SessionRequest(BaseModel):
@@ -62,6 +64,11 @@ async def channels(request: Request):
     return {"channels": _manager(request).resolver.channels()}
 
 
+@router.get("/status")
+async def broadcast_status(request: Request):
+    return _manager(request).status()
+
+
 @router.get("/channels/{channel}/now")
 async def now(channel: str, request: Request):
     try:
@@ -75,7 +82,22 @@ async def now(channel: str, request: Request):
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 async def create_session(body: SessionRequest, request: Request):
     try:
-        session, airing = _manager(request).create(body.channel, body.profile)
+        manager = _manager(request)
+        session, airing = manager.create(body.channel, body.profile)
+        for _ in range(PLAYLIST_READY_ATTEMPTS):
+            if manager.ready(session.session_id, PLAYLIST_READY_SEGMENTS):
+                break
+            if session.process.poll() is not None:
+                manager.fail(session.session_id)
+                raise HTTPException(
+                    502, "Broadcaster exited before producing a playable buffer"
+                )
+            await asyncio.sleep(PLAYLIST_STARTUP_INTERVAL)
+        else:
+            manager.fail(session.session_id)
+            raise HTTPException(
+                504, "Broadcaster did not produce a playable buffer in time"
+            )
         return {
             "session_id": session.session_id,
             "playlist_url": f"/api/watch/sessions/{session.session_id}/master.m3u8",

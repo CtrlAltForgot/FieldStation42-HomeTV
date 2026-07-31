@@ -417,6 +417,8 @@ class HLSSessionManager:
             "-loglevel",
             "warning",
             "-nostdin",
+            "-fflags",
+            "+genpts+discardcorrupt",
             "-ss",
             f"{airing.offset:.3f}",
             "-re",
@@ -437,8 +439,11 @@ class HLSSessionManager:
                 (stream for stream in streams if stream.get("codec_type") == "audio"),
                 {},
             )
-            copy_video = video.get("codec_name") == "h264" and subtitle is None
-            copy_audio = audio.get("codec_name") == "aac"
+            # The auto profile always normalizes timestamps, GOP cadence, and
+            # codecs. Stream-copying superficially compatible sources leaves
+            # arbitrary keyframes and timestamps that make live HLS unstable.
+            copy_video = False
+            copy_audio = False
             video_map = "0:v:0"
             video_filter = []
             if subtitle:
@@ -477,6 +482,7 @@ class HLSSessionManager:
                         "-maxrate", "8M",
                         "-bufsize", "10M",
                         "-g", "60",
+                        "-no-scenecut", "1",
                     ]
                 elif encoder == "libx264":
                     command += [
@@ -485,6 +491,7 @@ class HLSSessionManager:
                         "-tune", "zerolatency",
                         "-threads:v",
                         str(HLSSessionManager._transcode_threads()),
+                        "-sc_threshold", "0",
                     ]
                 else:
                     raise ValueError(
@@ -499,14 +506,18 @@ class HLSSessionManager:
             else:
                 command += ["-c:a", "aac", "-b:a", "160k"]
         command += [
+            "-avoid_negative_ts",
+            "make_zero",
             "-f",
             "hls",
             "-hls_time",
             "2",
             "-hls_list_size",
-            "12",
+            "30",
+            "-hls_delete_threshold",
+            "6",
             "-hls_flags",
-            "delete_segments+independent_segments+omit_endlist",
+            "delete_segments+independent_segments+omit_endlist+temp_file",
             "-hls_segment_filename",
             str(directory / "stream%05d.ts"),
             str(directory / "master.m3u8"),
@@ -546,6 +557,43 @@ class HLSSessionManager:
                 if broadcast.process.poll() is not None:
                     self._remove_broadcast(key)
             return True
+
+    def fail(self, session_id: str) -> bool:
+        """Remove a failed viewer lease and its unusable broadcaster."""
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session is None:
+                return False
+            self._remove_broadcast((session.channel, session.profile))
+            return True
+
+    def ready(self, session_id: str, minimum_segments: int = 3) -> bool:
+        session = self.get(session_id)
+        if session.process.poll() is not None:
+            return False
+        playlist = session.directory / "master.m3u8"
+        if not playlist.is_file():
+            return False
+        return sum(1 for _ in session.directory.glob("stream*.ts")) >= minimum_segments
+
+    def status(self) -> dict:
+        with self.lock:
+            now = time.monotonic()
+            return {
+                "broadcasts": [
+                    {
+                        "channel": broadcast.key[0],
+                        "profile": broadcast.key[1],
+                        "viewers": len(broadcast.leases),
+                        "running": broadcast.process.poll() is None,
+                        "segments": sum(
+                            1 for _ in broadcast.directory.glob("stream*.ts")
+                        ),
+                        "age_seconds": round(now - broadcast.created_at, 1),
+                    }
+                    for broadcast in self.broadcasts.values()
+                ]
+            }
 
     def cleanup(self) -> None:
         cutoff = time.monotonic() - self.idle_seconds
