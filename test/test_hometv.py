@@ -154,6 +154,23 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "War Dogs (2016)")
 
+    def test_star_wars_movie_uses_canonical_episode_punctuation(self):
+        display = _movie_display(
+            "/media/Movies/Star Wars Episode Vii The Force Awakens (2015).mkv"
+        )
+        self.assertEqual(
+            display["display_title"],
+            "Star Wars: Episode VII - The Force Awakens (2015)",
+        )
+
+    def test_filename_repairs_truncated_series_metadata(self):
+        display = program_display(
+            "/media/Game of Thrones/Season 01/"
+            "Game of Thrones S01E01 Winter Is Coming.mkv",
+            meta={"type": "episode", "show_title": "Game of", "title": "Winter Is Coming"},
+        )
+        self.assertEqual(display["display_title"], "Game of Thrones")
+
     def test_clean_program_number_is_not_treated_as_episode_number(self):
         display = program_display(
             "/media/channel-42.mp4", "Channel 42 Live Fixture"

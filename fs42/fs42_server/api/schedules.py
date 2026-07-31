@@ -28,6 +28,7 @@ TRAILING_NOTE_RE = re.compile(
     re.IGNORECASE,
 )
 TITLE_ALIASES = {
+    "game of thrones": "Game of Thrones",
     "schoolhouse rock": "Schoolhouse Rock",
     "shingeki no kyojin": "Attack on Titan",
     "spongebob": "SpongeBob SquarePants",
@@ -97,9 +98,24 @@ def _movie_display(path: str) -> dict:
             title = candidate[:match.start()].strip(" ._-(")
             if not title:
                 continue
+            normalized_title = _natural_title_case(_plain_title(title))
+            canonical_title = None
+            star_wars = re.match(
+                r"(?i)^star wars\s+(?:episode\s+)?"
+                r"(?P<episode>[ivxlcdm]+)\s+(?P<subtitle>.+)$",
+                normalized_title,
+            )
+            if star_wars:
+                subtitle = _natural_title_case(star_wars.group("subtitle"))
+                subtitle = subtitle[:1].upper() + subtitle[1:]
+                canonical_title = (
+                    "Star Wars: Episode "
+                    f"{star_wars.group('episode').upper()} - "
+                    f"{subtitle}"
+                )
             return {
                 "display_title": (
-                    f"{_guide_title_alias(title)} "
+                    f"{canonical_title or _guide_title_alias(normalized_title)} "
                     f"({match.group('year')})"
                 )
             }
@@ -121,8 +137,17 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
 
     if match:
         series_prefix = match.group("series").strip(" ._-")
-        if not series_title and series_prefix:
-            series_title = TitleParser.parse_title(series_prefix)
+        parsed_series = (
+            TitleParser.parse_title(series_prefix) if series_prefix else ""
+        )
+        if not series_title:
+            series_title = parsed_series
+        elif parsed_series.casefold().startswith(
+            series_title.casefold().rstrip() + " "
+        ):
+            # Repair incomplete NFO/tag titles such as "Game of" when the
+            # structured SxxExx filename contains the complete series name.
+            series_title = parsed_series
         if not episode_title and match.group("title"):
             episode_title = _natural_title_case(
                 TitleParser.parse_title(
