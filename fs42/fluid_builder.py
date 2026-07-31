@@ -11,7 +11,9 @@ from fs42.station_manager import StationManager
 from fs42.database import connect
 
 class FluidBuilder:
-    COMMERCIAL_BREAK_DETECTOR_VERSION = 3
+    # Version 4 invalidates boundaries generated before the authored-chapter
+    # fast path and tighter generic-boundary validation were introduced.
+    COMMERCIAL_BREAK_DETECTOR_VERSION = 4
 
     def __init__(self, db_path=None):
         if db_path is None:

@@ -15,6 +15,9 @@ from fs42.liquid_blocks import LiquidBlock
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
+    def test_current_detector_invalidates_pre_optimization_cache(self):
+        self.assertEqual(FluidBuilder.COMMERCIAL_BREAK_DETECTOR_VERSION, 4)
+
     def test_commercial_scan_cache_validates_file_identity_and_version(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             connection = connect(str(Path(temp_dir) / "cache.db"))
