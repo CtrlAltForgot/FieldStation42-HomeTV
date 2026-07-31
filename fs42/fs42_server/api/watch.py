@@ -100,10 +100,14 @@ async def now(channel: str, request: Request):
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 async def create_session(body: SessionRequest, request: Request):
+    session = None
     try:
         manager = _manager(request)
         session, airing = manager.create(body.channel, body.profile)
         for _ in range(PLAYLIST_READY_ATTEMPTS):
+            if await request.is_disconnected():
+                manager.delete(session.session_id)
+                raise HTTPException(499, "Channel tune was cancelled")
             if manager.ready(session.session_id, PLAYLIST_READY_SEGMENTS):
                 break
             if session.process.poll() is not None:
@@ -117,6 +121,9 @@ async def create_session(body: SessionRequest, request: Request):
             raise HTTPException(
                 504, "Broadcaster did not produce a playable buffer in time"
             )
+        if await request.is_disconnected():
+            manager.delete(session.session_id)
+            raise HTTPException(499, "Channel tune was cancelled")
         return {
             "session_id": session.session_id,
             "playlist_url": f"/api/watch/sessions/{session.session_id}/master.m3u8",
@@ -128,6 +135,10 @@ async def create_session(body: SessionRequest, request: Request):
         raise _watch_error(exc)
     except FileNotFoundError:
         raise HTTPException(503, "FFmpeg is not installed or not executable")
+    except asyncio.CancelledError:
+        if session is not None:
+            manager.delete(session.session_id)
+        raise
 
 
 @router.get("/sessions/{session_id}/master.m3u8")

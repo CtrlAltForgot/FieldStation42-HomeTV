@@ -368,6 +368,49 @@ class SessionTests(unittest.TestCase):
             self.assertIs(manager.get(second.session_id).process, processes[0])
             manager.close()
 
+    def test_channel_limit_evicts_unused_broadcast_for_rapid_tuning(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            media = root / "show.mkv"
+            media.touch()
+            when = dt.datetime.now()
+
+            def resolve(channel):
+                return Airing(
+                    str(channel), f"Channel {channel}", "Show", "Episode", when,
+                    when + dt.timedelta(minutes=30), when,
+                    when + dt.timedelta(minutes=30), str(media), 0, 1800, 1800,
+                )
+
+            processes = []
+
+            def factory(command, **_kwargs):
+                process = FakeProcess(command)
+                processes.append(process)
+                return process
+
+            manager = HLSSessionManager(
+                resolver=SimpleNamespace(now=resolve),
+                root=root / "hls",
+                max_sessions=2,
+                process_factory=factory,
+            )
+            first, _ = manager.create("1")
+            second, _ = manager.create("2")
+            manager.delete(first.session_id)
+
+            third, _ = manager.create("3")
+
+            self.assertNotIn(("1", "auto"), manager.broadcasts)
+            self.assertIn(("2", "auto"), manager.broadcasts)
+            self.assertIn(("3", "auto"), manager.broadcasts)
+            self.assertEqual(processes[0].returncode, 0)
+            self.assertIsNone(processes[1].returncode)
+            self.assertIsNone(processes[2].returncode)
+            manager.delete(second.session_id)
+            manager.delete(third.session_id)
+            manager.close()
+
     def test_nvenc_profile_uses_bounded_gpu_encoding(self):
         when = dt.datetime.now()
         airing = Airing(

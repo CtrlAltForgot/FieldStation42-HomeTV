@@ -272,6 +272,8 @@ class HLSSessionManager:
 
             if broadcast is None:
                 if len(self.broadcasts) >= self.max_sessions:
+                    self._evict_unused_broadcast()
+                if len(self.broadcasts) >= self.max_sessions:
                     raise WatchError("The server has reached its channel broadcast limit")
                 broadcast = self._start_broadcast(key, airing, profile)
 
@@ -654,6 +656,24 @@ class HLSSessionManager:
             self.sessions.clear()
             for key in list(self.broadcasts):
                 self._remove_broadcast(key)
+
+    def _evict_unused_broadcast(self) -> bool:
+        """Free the least-recently-used channel that has no attached viewers."""
+        candidates = [
+            broadcast
+            for broadcast in self.broadcasts.values()
+            if not broadcast.leases
+        ]
+        if not candidates:
+            return False
+        victim = min(candidates, key=lambda broadcast: broadcast.last_access)
+        LOG.info(
+            "Evicting idle channel broadcast %s for channel %s",
+            victim.broadcast_id,
+            victim.key[0],
+        )
+        self._remove_broadcast(victim.key)
+        return True
 
     def _remove_broadcast(self, key: tuple[str, str]) -> None:
         broadcast = self.broadcasts.pop(key, None)
