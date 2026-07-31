@@ -76,8 +76,8 @@
     // reserve native HLS for Safari and other browsers without MSE support.
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 12,
+        liveSyncDurationCount: 1,
+        liveMaxLatencyDurationCount: 10,
         maxLiveSyncPlaybackRate: 1.15,
         maxBufferLength: 60,
         maxMaxBufferLength: 90,

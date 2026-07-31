@@ -23,6 +23,7 @@ from fs42.media_processor import MediaProcessor
 from fs42.fs42_server.api.watch import (
     PLAYLIST_STARTUP_ATTEMPTS,
     PLAYLIST_STARTUP_INTERVAL,
+    PLAYLIST_READY_SEGMENTS,
     SessionRequest,
     _now_payload,
     channels as channel_endpoint,
@@ -225,6 +226,9 @@ class ResolverTests(unittest.TestCase):
 
 
 class SessionTests(unittest.TestCase):
+    def test_channel_tuning_starts_from_first_complete_segment(self):
+        self.assertEqual(PLAYLIST_READY_SEGMENTS, 1)
+
     def test_playlist_startup_allows_slow_transcodes(self):
         self.assertGreaterEqual(
             PLAYLIST_STARTUP_ATTEMPTS * PLAYLIST_STARTUP_INTERVAL,

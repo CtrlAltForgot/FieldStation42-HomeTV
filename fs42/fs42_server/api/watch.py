@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/watch", tags=["watch"])
 LOG = logging.getLogger("HomeTV.Client")
 PLAYLIST_STARTUP_ATTEMPTS = 200
 PLAYLIST_STARTUP_INTERVAL = 0.1
-PLAYLIST_READY_SEGMENTS = 3
+PLAYLIST_READY_SEGMENTS = 1
 PLAYLIST_READY_ATTEMPTS = 300
 
 
