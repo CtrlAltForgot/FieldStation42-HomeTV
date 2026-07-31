@@ -75,18 +75,19 @@ channel is unavailable until its schedule is extended.
 
 ```text
 read-only media ─┐
-station configs ─┼─> schedule resolver ─> HLS session manager ─> FFmpeg
+station configs ─┼─> schedule resolver ─> channel broadcaster ─> FFmpeg/NVENC
 SQLite schedule ─┘          │                       │              │
-                            └─> watch API            └─> runtime/hls/<id>
+                            └─> watch API            └─> rolling channel HLS
                                       │                            │
-                                      └──────── /watch browser <───┘
+                                      └── viewer leases <─ TV / PC / browsers
 ```
 
 - **Schedule resolver** performs read-only, parameterized SQLite queries and
   converts a schedule block into a current media path and exact offset.
-- **HLS session manager** owns FFmpeg subprocesses, validates every selected
-  media path against configured catalog entries, creates per-session
-  directories, tracks activity, and expires idle sessions.
+- **Channel broadcaster** owns one FFmpeg subprocess per active
+  channel/profile, validates every selected media path against configured
+  catalog entries, and produces a shared rolling HLS stream. Browser sessions
+  are lightweight leases; they never own encoders or interrupt other viewers.
 - **Watch API** exposes channel metadata, current-program information, session
   creation/deletion, and only the HLS files belonging to opaque session IDs.
 - **Watch client** is a responsive HTML application. Browsers with native HLS
@@ -119,10 +120,16 @@ do not reveal media paths.
 
 ## HLS and FFmpeg strategy
 
-The MVP creates one FFmpeg process per watch session. This is intentionally
-simple and allows different channels and client profiles independently. A
-future optimization may share a channel/profile pipeline while retaining the
-same API.
+Home TV creates one FFmpeg broadcaster per active channel/profile. Multiple
+TVs and browsers watching the same channel share its playlist and encoder.
+Each client receives a unique lease URL so activity and disconnects remain
+independent. An idle grace period keeps a broadcaster warm across page reloads
+and transient network reconnects.
+
+The Unraid deployment uses the NVIDIA container runtime and H.264 NVENC on the
+validated RTX 4060. The live profile uses a low-latency quality preset with a
+bounded 8 Mbps peak rate. Generic deployments retain bounded libx264 as a
+fallback.
 
 FFmpeg seeks to the calculated offset and writes a short, rolling HLS playlist
 with independent MPEG-TS segments. The initial profiles are:
@@ -164,15 +171,16 @@ point; their difference is bounded by startup and segment latency. The web
 client periodically fetches `now`, displays progress using the returned server
 timestamp, and recreates a session after a program boundary or playback error.
 
-A channel change deletes the previous session before creating the next.
+A channel change releases the previous viewer lease before acquiring the next.
 Volume, mute, and fullscreen are browser-local and never alter another viewer
 or the legacy MPV player.
 
 ## Session lifecycle and cleanup
 
-Each session has an opaque UUID, channel/profile metadata, process handle,
-creation time, last-access time, and a directory below the configured HLS
-runtime root (`runtime/hls` by default).
+Each viewer lease has an opaque UUID and activity timestamp. A shared channel
+broadcast owns the process handle, creation time, rolling directory, current
+schedule item, and its set of leases below the configured HLS runtime root
+(`runtime/hls` by default).
 
 Creation uses a private temporary directory that is renamed only after setup.
 Playlist and segment requests refresh `last_access`. Heartbeats cover paused

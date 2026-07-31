@@ -277,8 +277,63 @@ class SessionTests(unittest.TestCase):
             )
             self.assertTrue(session.directory.is_dir())
             self.assertTrue(manager.delete(session.session_id))
+            # Releasing a viewer keeps the shared channel broadcaster warm.
+            self.assertTrue(session.directory.exists())
+            manager.close()
             self.assertFalse(session.directory.exists())
             self.assertEqual(processes[0].returncode, 0)
+
+    def test_viewers_share_one_channel_broadcast(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "show.mkv"
+            media.touch()
+            when = dt.datetime.now()
+            airing = Airing(
+                "42", "Test TV", "Show", "Episode", when,
+                when + dt.timedelta(minutes=30), when,
+                when + dt.timedelta(minutes=30), str(media), 0, 1800, 1800,
+            )
+            processes = []
+
+            def factory(command, **_kwargs):
+                process = FakeProcess(command)
+                processes.append(process)
+                return process
+
+            manager = HLSSessionManager(
+                resolver=SimpleNamespace(now=lambda channel: airing),
+                root=Path(temp_dir) / "hls",
+                process_factory=factory,
+            )
+            first, _ = manager.create("42")
+            second, _ = manager.create("42")
+            self.assertNotEqual(first.session_id, second.session_id)
+            self.assertEqual(first.broadcast_id, second.broadcast_id)
+            self.assertEqual(first.directory, second.directory)
+            self.assertEqual(len(processes), 1)
+            manager.delete(first.session_id)
+            self.assertIsNone(processes[0].returncode)
+            self.assertIs(manager.get(second.session_id).process, processes[0])
+            manager.close()
+
+    def test_nvenc_profile_uses_bounded_gpu_encoding(self):
+        when = dt.datetime.now()
+        airing = Airing(
+            "42", "Test TV", "Show", "Episode", when,
+            when + dt.timedelta(minutes=30), when,
+            when + dt.timedelta(minutes=30), "/media/show.mkv", 0, 1800, 1800,
+        )
+        with patch.dict(
+            "os.environ", {"FS42_HLS_VIDEO_ENCODER": "h264_nvenc"}
+        ):
+            command = HLSSessionManager._ffmpeg_command(
+                airing,
+                "auto",
+                Path("/tmp/hls"),
+                streams=[{"codec_type": "video", "codec_name": "hevc"}],
+            )
+        self.assertIn("h264_nvenc", command)
+        self.assertEqual(command[command.index("-maxrate") + 1], "8M")
 
     def test_session_starts_ffmpeg_in_its_own_process_group(self):
         with tempfile.TemporaryDirectory() as temp_dir:

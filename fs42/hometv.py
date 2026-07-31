@@ -193,6 +193,20 @@ class StreamSession:
     process: subprocess.Popen
     created_at: float
     last_access: float
+    broadcast_id: str = ""
+
+
+@dataclass
+class ChannelBroadcast:
+    broadcast_id: str
+    key: tuple[str, str]
+    directory: Path
+    process: subprocess.Popen
+    media_path: str
+    item_end: dt.datetime
+    created_at: float
+    last_access: float
+    leases: set[str]
 
 
 class HLSSessionManager:
@@ -225,6 +239,7 @@ class HLSSessionManager:
         )
         self.process_factory = process_factory
         self.sessions: dict[str, StreamSession] = {}
+        self.broadcasts: dict[tuple[str, str], ChannelBroadcast] = {}
         self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
         # A single production worker owns this cache. Remove only UUID-shaped
@@ -242,42 +257,88 @@ class HLSSessionManager:
             raise ValueError(f"Unknown client profile: {profile}")
         with self.lock:
             self.cleanup()
-            if len(self.sessions) >= self.max_sessions:
-                raise WatchError("The server has reached its stream session limit")
             airing = self.resolver.now(channel)
+            key = (airing.channel_number, profile)
+            broadcast = self.broadcasts.get(key)
+            if broadcast is not None and (
+                broadcast.process.poll() is not None
+                or broadcast.media_path != airing.media_path
+                or broadcast.item_end != airing.item_end
+            ):
+                self._remove_broadcast(key)
+                broadcast = None
+
+            if broadcast is None:
+                if len(self.broadcasts) >= self.max_sessions:
+                    raise WatchError("The server has reached its channel broadcast limit")
+                broadcast = self._start_broadcast(key, airing, profile)
+
             session_id = str(uuid.uuid4())
-            directory = self.root / session_id
-            directory.mkdir(mode=0o700)
-            streams = self._probe_streams(airing.media_path) if profile == "auto" else []
-            subtitle = self._select_english_subtitle(streams)
-            command = self._ffmpeg_command(
-                airing, profile, directory, subtitle, streams
-            )
-            LOG.info(
-                "Starting HLS session %s for channel %s at %.3fs (%s)",
-                session_id,
-                airing.channel_number,
-                airing.offset,
-                profile,
-            )
-            try:
-                process = self.process_factory(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=None,
-                    start_new_session=True,
-                )
-            except Exception:
-                shutil.rmtree(directory, ignore_errors=True)
-                raise
             timestamp = time.monotonic()
             session = StreamSession(
-                session_id, airing.channel_number, profile, directory, process,
-                timestamp, timestamp
+                session_id,
+                airing.channel_number,
+                profile,
+                broadcast.directory,
+                broadcast.process,
+                broadcast.created_at,
+                timestamp,
+                broadcast.broadcast_id,
             )
             self.sessions[session_id] = session
+            broadcast.leases.add(session_id)
+            broadcast.last_access = timestamp
+            LOG.info(
+                "Attached viewer %s to channel broadcast %s (%s viewers)",
+                session_id,
+                broadcast.broadcast_id,
+                len(broadcast.leases),
+            )
             return session, airing
+
+    def _start_broadcast(
+        self, key: tuple[str, str], airing: Airing, profile: str
+    ) -> ChannelBroadcast:
+        broadcast_id = str(uuid.uuid4())
+        directory = self.root / broadcast_id
+        directory.mkdir(mode=0o700)
+        streams = self._probe_streams(airing.media_path) if profile == "auto" else []
+        subtitle = self._select_english_subtitle(streams)
+        command = self._ffmpeg_command(
+            airing, profile, directory, subtitle, streams
+        )
+        LOG.info(
+            "Starting shared HLS broadcast %s for channel %s at %.3fs (%s)",
+            broadcast_id,
+            airing.channel_number,
+            airing.offset,
+            profile,
+        )
+        try:
+            process = self.process_factory(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=None,
+                start_new_session=True,
+            )
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        timestamp = time.monotonic()
+        broadcast = ChannelBroadcast(
+            broadcast_id,
+            key,
+            directory,
+            process,
+            airing.media_path,
+            airing.item_end,
+            timestamp,
+            timestamp,
+            set(),
+        )
+        self.broadcasts[key] = broadcast
+        return broadcast
 
     @staticmethod
     def _probe_streams(media_path: str) -> list[dict]:
@@ -402,19 +463,36 @@ class HLSSessionManager:
             if copy_video:
                 command += ["-c:v", "copy"]
             else:
+                encoder = os.environ.get(
+                    "FS42_HLS_VIDEO_ENCODER", "libx264"
+                ).casefold()
+                if encoder == "h264_nvenc":
+                    command += [
+                        "-c:v", "h264_nvenc",
+                        "-preset", "p4",
+                        "-tune", "ll",
+                        "-rc", "vbr",
+                        "-cq", "21",
+                        "-b:v", "5M",
+                        "-maxrate", "8M",
+                        "-bufsize", "10M",
+                        "-g", "60",
+                    ]
+                elif encoder == "libx264":
+                    command += [
+                        "-c:v", "libx264",
+                        "-preset", "ultrafast",
+                        "-tune", "zerolatency",
+                        "-threads:v",
+                        str(HLSSessionManager._transcode_threads()),
+                    ]
+                else:
+                    raise ValueError(
+                        "FS42_HLS_VIDEO_ENCODER must be libx264 or h264_nvenc"
+                    )
                 command += [
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "ultrafast",
-                    "-tune",
-                    "zerolatency",
-                    "-threads:v",
-                    str(HLSSessionManager._transcode_threads()),
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-force_key_frames",
-                    "expr:gte(t,n_forced*2)",
+                    "-pix_fmt", "yuv420p",
+                    "-force_key_frames", "expr:gte(t,n_forced*2)",
                 ]
             if copy_audio:
                 command += ["-c:a", "copy"]
@@ -441,6 +519,9 @@ class HLSSessionManager:
             if session is None:
                 raise KeyError(session_id)
             session.last_access = time.monotonic()
+            broadcast = self.broadcasts.get((session.channel, session.profile))
+            if broadcast is not None:
+                broadcast.last_access = session.last_access
             return session
 
     def asset(self, session_id: str, asset: str) -> Path:
@@ -455,27 +536,52 @@ class HLSSessionManager:
     def delete(self, session_id: str) -> bool:
         with self.lock:
             session = self.sessions.pop(session_id, None)
-        if session is None:
-            return False
-        self._stop(session)
-        return True
+            if session is None:
+                return False
+            key = (session.channel, session.profile)
+            broadcast = self.broadcasts.get(key)
+            if broadcast is not None:
+                broadcast.leases.discard(session_id)
+                broadcast.last_access = time.monotonic()
+                if broadcast.process.poll() is not None:
+                    self._remove_broadcast(key)
+            return True
 
     def cleanup(self) -> None:
         cutoff = time.monotonic() - self.idle_seconds
         with self.lock:
-            expired = [
+            expired_leases = [
                 key
                 for key, session in self.sessions.items()
-                if session.last_access < cutoff or session.process.poll() is not None
+                if session.last_access < cutoff
             ]
-        for key in expired:
-            self.delete(key)
+            for session_id in expired_leases:
+                session = self.sessions.pop(session_id)
+                broadcast = self.broadcasts.get((session.channel, session.profile))
+                if broadcast is not None:
+                    broadcast.leases.discard(session_id)
+            expired_broadcasts = [
+                key
+                for key, broadcast in self.broadcasts.items()
+                if broadcast.process.poll() is not None
+                or (not broadcast.leases and broadcast.last_access < cutoff)
+            ]
+            for key in expired_broadcasts:
+                self._remove_broadcast(key)
 
     def close(self) -> None:
         with self.lock:
-            session_ids = list(self.sessions)
-        for session_id in session_ids:
-            self.delete(session_id)
+            self.sessions.clear()
+            for key in list(self.broadcasts):
+                self._remove_broadcast(key)
+
+    def _remove_broadcast(self, key: tuple[str, str]) -> None:
+        broadcast = self.broadcasts.pop(key, None)
+        if broadcast is None:
+            return
+        for session_id in list(broadcast.leases):
+            self.sessions.pop(session_id, None)
+        self._stop(broadcast)
 
     @staticmethod
     def _stop(session: StreamSession) -> None:

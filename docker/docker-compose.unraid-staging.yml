@@ -9,6 +9,7 @@ services:
     container_name: fieldstation42-hometv
     restart: unless-stopped
     init: true
+    runtime: nvidia
     ports:
       - "4243:4242"
     environment:
@@ -21,9 +22,12 @@ services:
       FS42_HLS_IDLE_SECONDS: "${FS42_HLS_IDLE_SECONDS:-30}"
       FS42_HLS_MAX_SESSIONS: "${FS42_HLS_MAX_SESSIONS:-4}"
       FS42_HLS_TRANSCODE_THREADS: "${FS42_HLS_TRANSCODE_THREADS:-2}"
+      FS42_HLS_VIDEO_ENCODER: "h264_nvenc"
       FS42_SCAN_CONCURRENCY: "${FS42_SCAN_CONCURRENCY:-2}"
       FS42_SCAN_THREADS: "${FS42_SCAN_THREADS:-1}"
       TZ: "${TZ:-America/Chicago}"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,video,utility"
     volumes:
       - "/mnt/user/Media:/media:ro"
       - "/mnt/user/appdata/fieldstation42-hometv/confs:/app/confs"
