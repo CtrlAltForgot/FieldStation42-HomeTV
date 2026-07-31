@@ -257,6 +257,23 @@ class ResolverTests(unittest.TestCase):
             "Season 6, Episode 5: The Splinter",
         )
 
+    def test_episode_metadata_removes_parenthesized_resolution(self):
+        display = program_display(
+            "/media/SpongeBob SquarePants/Season 06/"
+            "SpongeBob SquarePants S06E05A The Splinter.mkv",
+            meta={
+                "type": "episode",
+                "show_title": "SpongeBob SquarePants",
+                "season": 6,
+                "episode": "05A",
+                "title": "The Splinter (1080p)",
+            },
+        )
+        self.assertEqual(
+            display["program_details"],
+            "Season 6, Episode 5: The Splinter",
+        )
+
     def test_numbered_short_uses_directory_and_episode_title(self):
         display = program_display(
             "/media/Schoolhouse Rock/"

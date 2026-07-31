@@ -23,6 +23,11 @@ RELEASE_SUFFIX_RE = re.compile(
     r"web[\s._-]?(?:dl|rip)|blu[\s._-]?ray|bluray|remux|hdr|dv|"
     r"x26[45]|h[\s._-]?26[45]|hevc|av1|aac\d*|ac3|eac3)(?:\b|$).*$"
 )
+PAREN_RELEASE_SUFFIX_RE = re.compile(
+    r"(?i)\s*\((?:480p|720p|1080p|2160p|4k|web[\s._-]?(?:dl|rip)|"
+    r"blu[\s._-]?ray|bluray|remux|hdr|dv|x26[45]|h[\s._-]?26[45]|"
+    r"hevc|av1|aac\d*|ac3|eac3)(?:[^()]*)\)\s*$"
+)
 TRAILING_NOTE_RE = re.compile(
     r"\s*\((?!(?:19|20)\d{2}\)\s*$)[^()]+\)\s*$",
     re.IGNORECASE,
@@ -181,7 +186,11 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
         "display_title": _guide_title_alias(
             series_title or TitleParser.parse_title(filename)
         ),
-        "episode_title": _natural_title_case(episode_title or ""),
+        "episode_title": _natural_title_case(
+            PAREN_RELEASE_SUFFIX_RE.sub(
+                "", RELEASE_SUFFIX_RE.sub("", episode_title or "")
+            )
+        ),
         "season": season,
         "episode": _display_episode_number(episode),
     }
