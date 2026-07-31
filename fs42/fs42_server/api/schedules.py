@@ -19,6 +19,10 @@ RELEASE_SUFFIX_RE = re.compile(
     r"web[\s._-]?(?:dl|rip)|blu[\s._-]?ray|bluray|remux|hdr|dv|"
     r"x26[45]|h[\s._-]?26[45]|hevc|av1|aac\d*|ac3|eac3)(?:\b|$).*$"
 )
+TRAILING_NOTE_RE = re.compile(
+    r"\s*\((?!(?:19|20)\d{2}\)\s*$)[^()]+\)\s*$",
+    re.IGNORECASE,
+)
 TITLE_ALIASES = {
     "shingeki no kyojin": "Attack on Titan",
     "spongebob": "SpongeBob SquarePants",
@@ -66,6 +70,8 @@ def _guide_title_alias(title: str) -> str:
     # This function also receives already-clean schedule titles. Do not run
     # generic episode-number patterns here: "Channel 42 Live Fixture" is not
     # episode 42.
+    title = TRAILING_NOTE_RE.sub("", title)
+    title = RELEASE_SUFFIX_RE.sub("", title)
     normalized = _natural_title_case(_plain_title(title))
     lowered = normalized.casefold()
     for source, replacement in TITLE_ALIASES.items():

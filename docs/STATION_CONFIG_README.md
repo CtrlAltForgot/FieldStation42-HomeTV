@@ -177,6 +177,11 @@ If no `fallback_tag` is specified and content is not found, the scheduler will g
 
 ### Display Properties
 
+To exclude a show or media subdirectory from catalog rebuilds without moving
+or deleting it, create an empty `.fs42ignore` file inside that directory. The
+marker excludes the directory and all descendants. Rebuild the affected
+catalog and schedule afterward to remove previously cataloged programming.
+
 | Property | Type | Description |
 |----------|------|-------------|
 | `video_keepaspect` | boolean | Maintain video aspect ratio (default: `true`) |

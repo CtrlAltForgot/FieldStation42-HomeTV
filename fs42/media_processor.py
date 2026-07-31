@@ -326,6 +326,12 @@ class MediaProcessor:
         }
 
         for root, dirs, files in os.walk(path, followlinks=True):
+            if ".fs42ignore" in files:
+                logging.getLogger("MEDIA").info(
+                    "Ignoring media directory marked by .fs42ignore: %s", root
+                )
+                dirs[:] = []
+                continue
             # glob skipped dotfiles - keep doing that so hidden dirs and
             # macos appledouble sidecars (._foo.mp4) don't get picked up as media
             dirs[:] = [

@@ -160,6 +160,26 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "Channel 42 Live Fixture")
 
+    def test_guide_removes_cast_note_from_series_title(self):
+        display = program_display(
+            "/media/TV/The Big Bang Theory/file.mkv",
+            "The Big Bang Theory (kaley Cuoco)",
+        )
+        self.assertEqual(display["display_title"], "The Big Bang Theory")
+
+    def test_guide_removes_parenthesized_release_metadata(self):
+        display = program_display(
+            "/media/TV/El Ministerio Del Tiempo/file.mkv",
+            "El Ministerio Del Tiempo (1080p Web Dl X265 10bit Vertag)",
+        )
+        self.assertEqual(display["display_title"], "El Ministerio Del Tiempo")
+
+    def test_guide_preserves_release_year_parenthetical(self):
+        self.assertEqual(
+            program_display("/media/file.mkv", "Dark (2017)")["display_title"],
+            "Dark (2017)",
+        )
+
     def test_movie_extra_uses_parent_movie_identity(self):
         display = program_display(
             "/media/Movies/War Dogs (2016)/Featurettes/"
@@ -215,6 +235,18 @@ class ResolverTests(unittest.TestCase):
             episode.touch()
             extra.touch()
             self.assertEqual(MediaProcessor._rfind_media(temp_dir), [str(episode)])
+
+    def test_recursive_scan_honors_fs42ignore_marker(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            included = root / "Included" / "episode.mkv"
+            excluded = root / "El Ministerio Del Tiempo" / "episode.mkv"
+            included.parent.mkdir()
+            excluded.parent.mkdir()
+            included.touch()
+            excluded.touch()
+            (excluded.parent / ".fs42ignore").touch()
+            self.assertEqual(MediaProcessor._rfind_media(temp_dir), [str(included)])
 
     def test_schedule_path_must_exist_in_catalog(self):
         with tempfile.NamedTemporaryFile(suffix=".mp4") as media:
