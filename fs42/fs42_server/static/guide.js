@@ -307,8 +307,19 @@
       }
       state.previewSession = result.session_id;
       if (result.playback_kind === "embed") {
-        liveFrame.src = result.embed_url;
-        liveFrame.hidden = false;
+        // Older cached guide_frame.html versions do not contain this iframe.
+        // Create it lazily so mixed-version browser caches remain functional.
+        const frame = $("#preview-live-news") || (() => {
+          const created = document.createElement("iframe");
+          created.id = "preview-live-news";
+          created.title = "Live news preview";
+          created.allow = "autoplay; encrypted-media";
+          created.tabIndex = -1;
+          $("#preview-media")?.prepend(created);
+          return created;
+        })();
+        frame.src = result.embed_url;
+        frame.hidden = false;
         video.hidden = true;
         art.hidden = true;
         $("#preview-fallback").hidden = true;
@@ -349,8 +360,11 @@
     video.pause();
     video.hidden = true;
     video.removeAttribute("src");
-    liveFrame.hidden = true;
-    liveFrame.removeAttribute("src");
+    const activeLiveFrame = $("#preview-live-news");
+    if (activeLiveFrame) {
+      activeLiveFrame.hidden = true;
+      activeLiveFrame.removeAttribute("src");
+    }
     if (state.previewSession) {
       const id = state.previewSession;
       state.previewSession = null;
