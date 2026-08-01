@@ -12,6 +12,10 @@ EPISODE_RE = re.compile(
     r"(?i)^(?P<series>.*?)[\s._-]*s(?P<season>\d{1,3})"
     r"[\s._-]*e(?P<episode>\d{1,3}[a-z]*)[\s._-]*(?P<title>.*)$"
 )
+LEADING_X_EPISODE_RE = re.compile(
+    r"(?i)^0*(?P<season>\d{1,3})x0*(?P<episode>\d{1,3}[a-z]*)"
+    r"[\s._-]*(?P<title>.*)$"
+)
 LOOSE_EPISODE_RE = re.compile(
     r"(?i)^(?P<collection>.*?)[\s._-]+(?P<episode>\d{1,3})"
     r"[\s._-]+(?P<title>\D.*)$"
@@ -145,7 +149,8 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
     meta = meta or {}
     filename = Path(path).stem
     match = EPISODE_RE.match(filename)
-    if meta.get("type") != "episode" and not match:
+    leading_match = LEADING_X_EPISODE_RE.match(filename)
+    if meta.get("type") != "episode" and not match and not leading_match:
         return {}
 
     series_title = meta.get("show_title")
@@ -174,6 +179,20 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
             )
         season = season if season is not None else int(match.group("season"))
         episode = episode if episode is not None else match.group("episode")
+
+    if leading_match:
+        if not episode_title and leading_match.group("title"):
+            episode_title = _natural_title_case(
+                TitleParser.parse_title(
+                    RELEASE_SUFFIX_RE.sub("", leading_match.group("title"))
+                )
+            )
+        season = (
+            season if season is not None else int(leading_match.group("season"))
+        )
+        episode = (
+            episode if episode is not None else leading_match.group("episode")
+        )
 
     if not series_title:
         parent = Path(path).parent

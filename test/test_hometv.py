@@ -246,6 +246,16 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "Attack on Titan")
 
+    def test_leading_x_episode_code_uses_parent_series(self):
+        display = program_display(
+            "/media/Chowder/Season 02/02x11 the Dinner Theater.mkv"
+        )
+        self.assertEqual(display["display_title"], "Chowder")
+        self.assertEqual(
+            display["program_details"],
+            "Season 2, Episode 11: The Dinner Theater",
+        )
+
     def test_split_episode_code_is_normalized_for_viewers(self):
         display = program_display(
             "/media/SpongeBob SquarePants/Season 06/"
