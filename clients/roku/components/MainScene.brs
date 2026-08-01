@@ -14,10 +14,9 @@ sub init()
     m.currentChannel = 0
     m.currentProgram = 0
     m.timeline = []
-    m.windowOffset = 0
-    m.windowMinutes = 180
+    m.windowOffsetSeconds = 0
+    m.windowSeconds = 10800
     m.trackWidth = 1490
-    m.pixelsPerMinute = m.trackWidth / m.windowMinutes
     m.autoFollowNow = true
     m.guideLoadedSeconds = 0
     m.lastGuideShift = -1
@@ -53,7 +52,7 @@ sub onGuideLoaded(event)
     if data = invalid or data.channels = invalid then return
     m.rows = data.channels
     if data.timeline <> invalid then m.timeline = data.timeline
-    if data.current_offset_minute <> invalid then m.windowOffset = data.current_offset_minute
+    if data.current_offset_second <> invalid then m.windowOffsetSeconds = data.current_offset_second
     m.guideLoadedSeconds = CreateObject("roDateTime").AsSeconds()
     root = CreateObject("roSGNode", "ContentNode")
     for each row in m.rows
@@ -61,7 +60,7 @@ sub onGuideLoaded(event)
         item.title = row.channel_number + "   " + row.channel_name
     end for
     m.channels.content = root
-    m.top.FindNode("status").text = "Ready"
+    m.top.FindNode("status").text = ""
     m.top.SetFocus(true)
     onChannelFocused(invalid)
     renderTimeline()
@@ -96,19 +95,19 @@ sub onProgramFocused(event)
     showProgram(m.programs.itemFocused)
 end sub
 
-function closestProgramIndex(rowIndex as Integer, targetMinute as Float) as Integer
+function closestProgramIndex(rowIndex as Integer, targetSecond as Integer) as Integer
     if rowIndex < 0 or rowIndex >= m.rows.Count() then return 0
     programs = m.rows[rowIndex].programs
     if programs = invalid or programs.Count() = 0 then return 0
     closest = 0
     best = 999999.0
     for index = 0 to programs.Count() - 1
-        starts = programs[index].guide_start_minute
-        ends = programs[index].guide_end_minute
+        starts = programs[index].guide_start_second
+        ends = programs[index].guide_end_second
         if starts <> invalid and ends <> invalid
             distance = 0.0
-            if targetMinute < starts then distance = starts - targetMinute
-            if targetMinute > ends then distance = targetMinute - ends
+            if targetSecond < starts then distance = starts - targetSecond
+            if targetSecond > ends then distance = targetSecond - ends
             if distance < best
                 best = distance
                 closest = index
@@ -132,14 +131,31 @@ function addGuideLabel(group as Object, value as String, x as Integer, y as Inte
     return label
 end function
 
+function addMarqueeLabel(group as Object, value as String, x as Integer, y as Integer, width as Integer, height as Integer, color as String, font as String) as Object
+    label = CreateObject("roSGNode", "ScrollingLabel")
+    label.text = value
+    label.translation = [x, y]
+    label.maxWidth = width
+    label.height = height
+    label.color = color
+    label.font = font
+    label.horizAlign = "left"
+    label.vertAlign = "center"
+    label.scrollSpeed = 46
+    label.repeatCount = -1
+    group.AppendChild(label)
+    return label
+end function
+
 sub renderTimeline()
     timeline = m.top.FindNode("timeline")
     count = timeline.GetChildCount()
     if count > 0 then timeline.RemoveChildrenIndex(count, 0)
+    addGuideLabel(timeline, "NOW", 8, 0, 120, "#62D5FF", "font:SmallBoldSystemFont")
     for each tick in m.timeline
-        minute = tick.minute
-        if minute >= m.windowOffset and minute <= m.windowOffset + m.windowMinutes
-            x = Int((minute - m.windowOffset) * m.pixelsPerMinute)
+        second = tick.minute * 60
+        if second >= m.windowOffsetSeconds and second <= m.windowOffsetSeconds + m.windowSeconds
+            x = Int((second - m.windowOffsetSeconds) * m.trackWidth / m.windowSeconds)
             addGuideLabel(timeline, tick.label, x + 8, 0, 180, "#AAB9C7", "font:SmallSystemFont")
             marker = CreateObject("roSGNode", "Rectangle")
             marker.translation = [x, 35]
@@ -152,17 +168,17 @@ sub renderTimeline()
 end sub
 
 sub ensureProgramVisible(programData as Object)
-    starts = programData.guide_start_minute
-    ends = programData.guide_end_minute
+    starts = programData.guide_start_second
+    ends = programData.guide_end_second
     if starts = invalid or ends = invalid then return
     changed = false
-    if starts < m.windowOffset
-        m.windowOffset = starts
-        if m.windowOffset < 0 then m.windowOffset = 0
+    if starts < m.windowOffsetSeconds
+        m.windowOffsetSeconds = starts
+        if m.windowOffsetSeconds < 0 then m.windowOffsetSeconds = 0
         changed = true
-    else if ends > m.windowOffset + m.windowMinutes
-        m.windowOffset = starts - 30
-        if m.windowOffset < 0 then m.windowOffset = 0
+    else if ends > m.windowOffsetSeconds + m.windowSeconds
+        m.windowOffsetSeconds = starts - 1800
+        if m.windowOffsetSeconds < 0 then m.windowOffsetSeconds = 0
         changed = true
     end if
     if changed then renderTimeline()
@@ -188,43 +204,45 @@ sub renderGuideGrid()
         channelBg.height = 78
         channelBg.color = "#101D2A"
         grid.AppendChild(channelBg)
-        addGuideLabel(grid, rowData.channel_number + "  " + rowData.channel_name, 16, y + 7, 225, "#FFFFFF", "font:SmallBoldSystemFont")
+        addMarqueeLabel(grid, rowData.channel_number + "  " + rowData.channel_name, 16, y + 7, 225, 64, "#FFFFFF", "font:SmallBoldSystemFont")
         programs = rowData.programs
         if programs = invalid or programs.Count() = 0
             addGuideLabel(grid, "No programming available", 280, y + 7, 1440, "#8195A7", "font:SmallSystemFont")
         else
             for programIndex = 0 to programs.Count() - 1
                 programData = programs[programIndex]
-                starts = programData.guide_start_minute
-                ends = programData.guide_end_minute
-                if starts = invalid or ends = invalid then goto nextProgram
-                visibleStart = starts
-                if visibleStart < m.windowOffset then visibleStart = m.windowOffset
-                visibleEnd = ends
-                if visibleEnd > m.windowOffset + m.windowMinutes then visibleEnd = m.windowOffset + m.windowMinutes
-                if visibleEnd <= visibleStart then goto nextProgram
-                x = 270 + Int((visibleStart - m.windowOffset) * m.pixelsPerMinute)
-                width = Int((visibleEnd - visibleStart) * m.pixelsPerMinute) - 6
-                if width < 72 then width = 72
-                if x + width > 1760 then width = 1760 - x
-                card = CreateObject("roSGNode", "Rectangle")
-                card.translation = [x, y]
-                card.width = width
-                card.height = 78
-                card.color = "#202D3A"
-                if rowIndex = m.currentChannel and programIndex = m.currentProgram then card.color = "#1675B8"
-                grid.AppendChild(card)
-                title = programData.display_title
-                if title = invalid or title = "" then title = programData.title
-                addGuideLabel(grid, title, x + 14, y + 2, width - 24, "#FFFFFF", "font:SmallBoldSystemFont")
-                detail = programData.program_details
-                if detail = invalid then detail = ""
-                timeLabel = programData.guide_time
-                if timeLabel = invalid then timeLabel = ""
-                if detail <> "" then timeLabel = timeLabel + " · " + detail
-                detailLabel = addGuideLabel(grid, timeLabel, x + 14, y + 37, width - 24, "#AAB9C7", "font:TinySystemFont")
-                detailLabel.height = 35
-                nextProgram:
+                starts = programData.guide_start_second
+                ends = programData.guide_end_second
+                if starts <> invalid and ends <> invalid
+                    visibleStart = starts
+                    if visibleStart < m.windowOffsetSeconds then visibleStart = m.windowOffsetSeconds
+                    visibleEnd = ends
+                    if visibleEnd > m.windowOffsetSeconds + m.windowSeconds then visibleEnd = m.windowOffsetSeconds + m.windowSeconds
+                    if visibleEnd > visibleStart
+                        x = 270 + Int((visibleStart - m.windowOffsetSeconds) * m.trackWidth / m.windowSeconds)
+                        width = Int((visibleEnd - visibleStart) * m.trackWidth / m.windowSeconds) - 6
+                        if width < 72 then width = 72
+                        if x + width > 1760 then width = 1760 - x
+                        if width > 0
+                            card = CreateObject("roSGNode", "Rectangle")
+                            card.translation = [x, y]
+                            card.width = width
+                            card.height = 78
+                            card.color = "#202D3A"
+                            if rowIndex = m.currentChannel and programIndex = m.currentProgram then card.color = "#1675B8"
+                            grid.AppendChild(card)
+                            title = programData.display_title
+                            if title = invalid or title = "" then title = programData.title
+                            addMarqueeLabel(grid, title, x + 14, y + 2, width - 24, 35, "#FFFFFF", "font:SmallBoldSystemFont")
+                            detail = programData.program_details
+                            if detail = invalid then detail = ""
+                            timeLabel = programData.guide_time
+                            if timeLabel = invalid then timeLabel = ""
+                            if detail <> "" then timeLabel = timeLabel + " · " + detail
+                            addMarqueeLabel(grid, timeLabel, x + 14, y + 37, width - 24, 35, "#AAB9C7", "font:TinySystemFont")
+                        end if
+                    end if
+                end if
             end for
         end if
     end for
@@ -345,10 +363,10 @@ sub updateClock()
     if Len(minutes) = 1 then minutes = "0" + minutes
     m.top.FindNode("clock").text = displayHour.ToStr() + ":" + minutes + suffix
     if m.autoFollowNow and m.guideLoadedSeconds > 0 and m.rows.Count() > 0
-        elapsed = (now.AsSeconds() - m.guideLoadedSeconds) / 60.0
-        shifted = Int((m.windowOffset + elapsed) * 6)
+        elapsed = now.AsSeconds() - m.guideLoadedSeconds
+        shifted = Int((m.windowOffsetSeconds + elapsed) / 10)
         if shifted <> m.lastGuideShift
-            m.windowOffset = m.windowOffset + elapsed
+            m.windowOffsetSeconds = m.windowOffsetSeconds + elapsed
             m.guideLoadedSeconds = now.AsSeconds()
             m.lastGuideShift = shifted
             renderTimeline()
@@ -403,28 +421,28 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         return true
     end if
     if key = "up"
-        targetMinute = m.windowOffset
+        targetSecond = m.windowOffsetSeconds
         currentPrograms = m.rows[m.currentChannel].programs
         if currentPrograms <> invalid and currentPrograms.Count() > m.currentProgram
-            targetMinute = (currentPrograms[m.currentProgram].guide_start_minute + currentPrograms[m.currentProgram].guide_end_minute) / 2
+            targetSecond = Int((currentPrograms[m.currentProgram].guide_start_second + currentPrograms[m.currentProgram].guide_end_second) / 2)
         end if
         m.currentChannel = m.currentChannel - 1
         if m.currentChannel < 0 then m.currentChannel = 0
         onChannelFocused(invalid)
-        m.currentProgram = closestProgramIndex(m.currentChannel, targetMinute)
+        m.currentProgram = closestProgramIndex(m.currentChannel, targetSecond)
         showProgram(m.currentProgram)
         renderGuideGrid()
         return true
     else if key = "down"
-        targetMinute = m.windowOffset
+        targetSecond = m.windowOffsetSeconds
         currentPrograms = m.rows[m.currentChannel].programs
         if currentPrograms <> invalid and currentPrograms.Count() > m.currentProgram
-            targetMinute = (currentPrograms[m.currentProgram].guide_start_minute + currentPrograms[m.currentProgram].guide_end_minute) / 2
+            targetSecond = Int((currentPrograms[m.currentProgram].guide_start_second + currentPrograms[m.currentProgram].guide_end_second) / 2)
         end if
         m.currentChannel = m.currentChannel + 1
         if m.currentChannel >= m.rows.Count() then m.currentChannel = m.rows.Count() - 1
         onChannelFocused(invalid)
-        m.currentProgram = closestProgramIndex(m.currentChannel, targetMinute)
+        m.currentProgram = closestProgramIndex(m.currentChannel, targetSecond)
         showProgram(m.currentProgram)
         renderGuideGrid()
         return true

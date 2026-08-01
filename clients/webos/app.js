@@ -44,7 +44,7 @@
   }
 
   function renderTimeline() {
-    $("#timeline").innerHTML = timeline.map(function (tick) {
+    $("#timeline").innerHTML = '<span class="now-label" style="left:0">NOW</span>' + timeline.map(function (tick) {
       if (tick.minute < windowOffset || tick.minute > windowOffset + windowMinutes) return "";
       var left = 100 * (tick.minute - windowOffset) / windowMinutes;
       return '<span style="left:' + left + '%">' + escapeHtml(tick.label) + '</span>';
@@ -95,7 +95,7 @@
       guideLoadedAt = Date.now(); lastGuideShift = guideLoadedAt;
       row = Math.min(row, Math.max(0, rows.length - 1));
       program = 0;
-      $("#status").textContent = "Ready";
+      $("#status").textContent = "";
       render();
     }).catch(function (error) { $("#status").textContent = error.message; });
   }

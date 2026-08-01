@@ -40,7 +40,7 @@ from fs42.fs42_server.api.watch import (
 )
 from fs42.fs42_server.api import build as build_api
 from fs42.fs42_server.api import settings as settings_api
-from fs42.fs42_server.api.tv import _compact_tv_program
+from fs42.fs42_server.api.tv import _compact_tv_program, guide_card_rect
 from fs42.fs42_server.api.schedules import (
     _attach_meta,
     _episode_display,
@@ -2085,6 +2085,37 @@ class TVGuideAPITests(unittest.TestCase):
         self.assertEqual(compact["guide_end_minute"], 20)
         self.assertEqual(compact["program_description"], "A complete episode summary.")
         self.assertNotIn("meta", compact)
+
+    def test_roku_reference_grid_clips_current_program_at_left_edge(self):
+        self.assertEqual(guide_card_rect(-900, 900, 24), (0, 114))
+
+    def test_roku_reference_grid_sizes_short_episode_and_long_movie(self):
+        short = guide_card_rect(0, 900, 0)
+        movie = guide_card_rect(-7200, 3600, 0)
+        self.assertEqual(short, (0, 118))
+        self.assertEqual(movie, (0, 490))
+
+    def test_roku_reference_grid_rejects_past_and_future_offscreen_cards(self):
+        self.assertIsNone(guide_card_rect(-3600, -1, 0))
+        self.assertIsNone(guide_card_rect(10_801, 12_000, 0))
+
+    def test_roku_reference_grid_moves_future_window_deterministically(self):
+        self.assertEqual(guide_card_rect(12_000, 13_800, 10_200), (248, 242))
+
+    def test_live_news_row_fills_window_and_keeps_guide_description(self):
+        start = dt.datetime(2026, 8, 1, 16, 0)
+        program = {
+            "start_time": start,
+            "end_time": start + dt.timedelta(hours=6),
+            "title": "ABC News Live",
+            "program_details": "Live news coverage",
+            "artwork_url": "/static/news/abc.jpg",
+        }
+        compact = _compact_tv_program(program, start)
+        self.assertEqual(compact["program_description"], "Live news coverage")
+        self.assertEqual(compact["guide_start_second"], 0)
+        self.assertEqual(compact["guide_end_second"], 21_600)
+        self.assertEqual(guide_card_rect(0, 21_600, 0), (0, 1_484))
 
 
 class BuildOperationTests(unittest.TestCase):

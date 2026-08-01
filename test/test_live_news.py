@@ -243,14 +243,26 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
         webos = open("clients/webos/app.js", encoding="utf-8").read()
         tv_api = open("fs42/fs42_server/api/tv.py", encoding="utf-8").read()
-        self.assertIn("guide_start_minute", roku)
-        self.assertIn("guide_end_minute", roku)
-        self.assertIn("m.pixelsPerMinute", roku)
+        self.assertIn("guide_start_second", roku)
+        self.assertIn("guide_end_second", roku)
+        self.assertIn("m.trackWidth / m.windowSeconds", roku)
         self.assertIn("program.program_description", roku)
         self.assertIn("guide_start_minute", webos)
         self.assertIn("windowMinutes", webos)
         self.assertIn("item.program_description", webos)
         self.assertIn('"timeline"', tv_api)
+
+    def test_roku_guide_uses_integer_geometry_marquees_and_aspect_safe_art(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
+        self.assertIn("guide_start_second", roku)
+        self.assertIn("m.windowOffsetSeconds", roku)
+        self.assertNotIn("goto nextProgram", roku)
+        self.assertIn('CreateObject("roSGNode", "ScrollingLabel")', roku)
+        self.assertIn('scrollSpeed = 46', roku)
+        self.assertIn('loadDisplayMode="scaleToZoom"', scene)
+        self.assertGreaterEqual(scene.count("<ScrollingLabel"), 3)
+        self.assertNotIn('.text = "Ready"', roku)
 
     def test_live_news_embed_cannot_capture_controls_or_pause(self):
         player = open(

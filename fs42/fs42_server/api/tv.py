@@ -38,7 +38,9 @@ def _compact_tv_program(program, guide_start: dt.datetime):
     metadata = _field(program, "meta", {}) or {}
     description = (
         metadata.get("plot") or metadata.get("description")
-        or metadata.get("outline") or ""
+        or metadata.get("outline")
+        or _field(program, "program_details", "")
+        or ""
     )
     return {
         "title": _field(program, "title", ""),
@@ -50,11 +52,30 @@ def _compact_tv_program(program, guide_start: dt.datetime):
         "end_time": _iso(ends),
         "guide_start_minute": (starts - guide_start).total_seconds() / 60,
         "guide_end_minute": (ends - guide_start).total_seconds() / 60,
+        "guide_start_second": int((starts - guide_start).total_seconds()),
+        "guide_end_second": int((ends - guide_start).total_seconds()),
         "guide_time": start_label,
         "guide_time_range": f"{start_label}–{end_label}",
         "artwork_url": _field(program, "artwork_url", ""),
         "airing_kind": _field(program, "airing_kind", ""),
     }
+
+
+def guide_card_rect(
+    starts: int, ends: int, window_start: int,
+    window_seconds: int = 10_800, track_width: int = 1_490,
+) -> tuple[int, int] | None:
+    """Reference geometry shared by tests and the integer-only Roku model."""
+    visible_start = max(starts, window_start)
+    visible_end = min(ends, window_start + window_seconds)
+    if visible_end <= visible_start:
+        return None
+    x = int((visible_start - window_start) * track_width / window_seconds)
+    width = max(
+        72,
+        int((visible_end - visible_start) * track_width / window_seconds) - 6,
+    )
+    return x, min(width, track_width - x)
 
 
 @router.get("/config")
@@ -156,6 +177,7 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
         "end": _iso(end),
         "server_time": _iso(now),
         "current_offset_minute": (now - start).total_seconds() / 60,
+        "current_offset_second": int((now - start).total_seconds()),
         "channels": rows,
         "artwork_ready": True,
         "timeline": [

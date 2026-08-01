@@ -7,11 +7,11 @@
   <children>
     <Rectangle width="1920" height="1080" color="#07111D" />
     <Rectangle id="heroShade" width="1920" height="330" color="#0D2135" />
-    <Poster id="artwork" translation="[60,45]" width="430" height="242" loadDisplayMode="scaleToFill" />
+    <Poster id="artwork" translation="[60,45]" width="430" height="242" loadDisplayMode="scaleToZoom" />
     <Label id="brand" translation="[530,45]" width="1300" text="myHomeTV" color="#62D5FF" font="font:SmallBoldSystemFont" />
-    <Label id="programTitle" translation="[530,88]" width="1300" height="66" color="#FFFFFF" font="font:LargeBoldSystemFont" wrap="true" />
-    <Label id="programDetails" translation="[530,164]" width="1300" height="42" color="#AAB9C7" font="font:MediumSystemFont" />
-    <Label id="programDescription" translation="[530,210]" width="1300" height="80" color="#899BAB" font="font:SmallSystemFont" wrap="true" />
+    <ScrollingLabel id="programTitle" translation="[530,88]" maxWidth="1300" height="66" color="#FFFFFF" font="font:LargeBoldSystemFont" scrollSpeed="46" repeatCount="-1" vertAlign="center" />
+    <ScrollingLabel id="programDetails" translation="[530,164]" maxWidth="1300" height="42" color="#AAB9C7" font="font:MediumSystemFont" scrollSpeed="46" repeatCount="-1" vertAlign="center" />
+    <ScrollingLabel id="programDescription" translation="[530,210]" maxWidth="1300" height="55" color="#899BAB" font="font:SmallSystemFont" scrollSpeed="46" repeatCount="-1" vertAlign="center" />
     <Label id="clock" translation="[1680,42]" width="180" horizAlign="right" color="#FFFFFF" font="font:MediumBoldSystemFont" />
     <Rectangle translation="[0,330]" width="1920" height="2" color="#24435D" />
     <Label translation="[55,350]" width="260" text="CHANNEL" color="#62D5FF" font="font:SmallBoldSystemFont" />
