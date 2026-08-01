@@ -87,6 +87,24 @@ def _now_payload(airing, timestamp):
     return payload
 
 
+def _station_artwork_svg(station: dict) -> str:
+    """Return a deterministic identity card for a schedule-less channel."""
+    from html import escape
+
+    name = escape(
+        str(station.get("network_long_name") or station["network_name"])
+    )
+    kind = escape(
+        str(station.get("network_type", "channel")).replace("_", " ").title()
+    )
+    number = escape(str(station.get("channel_number", "—")))
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">
+<defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#173f70"/><stop offset="1" stop-color="#07111d"/></linearGradient></defs>
+<rect width="1280" height="720" fill="url(#g)"/><text x="80" y="130" fill="#62d5ff" font-family="sans-serif" font-size="34" font-weight="700">myHomeTV · CH {number}</text>
+<text x="80" y="350" fill="white" font-family="sans-serif" font-size="76" font-weight="700">{name}</text>
+<text x="80" y="430" fill="#b8c8d8" font-family="sans-serif" font-size="36">{kind}</text></svg>'''
+
+
 @router.get("/channels")
 async def channels(request: Request):
     return {"channels": _manager(request).resolver.channels()}
@@ -136,6 +154,12 @@ async def prewarm(channel: str, request: Request):
                 "prewarmed": bool(hls_url),
                 "reason": "external_live",
             }
+        if station.get("_has_schedule") is False:
+            return {
+                "channel": channel,
+                "prewarmed": False,
+                "reason": "display_only",
+            }
         session, _airing = await asyncio.to_thread(
             manager.create, channel, "auto", subtitle_mode="auto"
         )
@@ -154,6 +178,11 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
         if station.get("network_type") == "live_news":
             return Response(
                 artwork_svg(station), media_type="image/svg+xml",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        if station.get("_has_schedule") is False:
+            return Response(
+                _station_artwork_svg(station), media_type="image/svg+xml",
                 headers={"Cache-Control": "public, max-age=86400"},
             )
         airing = resolver.now(channel, at or dt.datetime.now())

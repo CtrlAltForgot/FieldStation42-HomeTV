@@ -91,15 +91,17 @@ class ScheduleResolver:
     def channels(self) -> list[dict]:
         channels = []
         for station in self.manager.stations:
-            if station.get("hidden") or not (
-                station.get("_has_schedule", False)
-                or station.get("network_type") == "live_news"
-            ):
+            if station.get("hidden"):
                 continue
             channels.append(
                 {
                     "channel_number": str(station["channel_number"]),
                     "channel_name": station["network_name"],
+                    "network_type": station.get("network_type", "standard"),
+                    "is_tunable": bool(
+                        station.get("_has_schedule", False)
+                        or station.get("network_type") == "live_news"
+                    ),
                 }
             )
         return channels
@@ -111,13 +113,10 @@ class ScheduleResolver:
                 str(station.get("channel_number")) == value
                 or station.get("network_name") == value
             ):
-                if (
-                    station.get("_has_schedule", False)
-                    or station.get("network_type") == "live_news"
-                ) and not station.get("hidden"):
+                if not station.get("hidden"):
                     return station
                 break
-        raise ChannelNotFound(f"Unknown scheduled channel: {channel}")
+        raise ChannelNotFound(f"Unknown channel: {channel}")
 
     def now(self, channel: str, when: dt.datetime | None = None) -> Airing:
         when = when or _local_now()

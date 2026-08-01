@@ -9,6 +9,9 @@ sub init()
     m.pendingVideoId = ""
     m.pendingSessionId = ""
     m.pendingHudTitle = ""
+    m.pendingArtwork = ""
+    m.activeHudTitle = ""
+    m.activeArtwork = ""
     m.guideLayer = m.top.FindNode("guideLayer")
     m.videoA.ObserveField("state", "onVideoAState")
     m.videoB.ObserveField("state", "onVideoBState")
@@ -33,6 +36,11 @@ sub init()
     m.hudTimer.duration = 6
     m.hudTimer.repeat = false
     m.hudTimer.ObserveField("fire", "hidePlayerHud")
+    m.adjacentTimer = CreateObject("roSGNode", "Timer")
+    m.adjacentTimer.duration = 20
+    m.adjacentTimer.repeat = true
+    m.adjacentTimer.ObserveField("fire", "prewarmAdjacentChannels")
+    m.adjacentPrewarmTasks = []
     loadGuide()
     m.clockTimer = CreateObject("roSGNode", "Timer")
     m.clockTimer.duration = 1
@@ -95,11 +103,31 @@ end sub
 sub prewarmFocusedChannel()
     if m.rows.Count() = 0 or m.inPlayer then return
     row = m.rows[m.currentChannel]
+    if row.is_tunable = false then return
     m.prewarmTask = CreateObject("roSGNode", "RequestTask")
     m.prewarmTask.url = m.server + "/api/watch/channels/" + row.channel_number + "/prewarm"
     m.prewarmTask.method = "POST"
     m.prewarmTask.body = "{}"
     m.prewarmTask.control = "run"
+end sub
+
+sub prewarmAdjacentChannels()
+    if not m.inPlayer or m.rows.Count() < 2 then return
+    tasks = []
+    for each delta in [-1, 1]
+        index = m.currentChannel + delta
+        if index < 0 then index = m.rows.Count() - 1
+        if index >= m.rows.Count() then index = 0
+        row = m.rows[index]
+        if row.is_tunable = false then continue for
+        task = CreateObject("roSGNode", "RequestTask")
+        task.url = m.server + "/api/watch/channels/" + row.channel_number + "/prewarm"
+        task.method = "POST"
+        task.body = "{}"
+        task.control = "run"
+        tasks.Push(task)
+    end for
+    m.adjacentPrewarmTasks = tasks
 end sub
 
 function closestProgramIndex(rowIndex as Integer, targetPixel as Integer) as Integer
@@ -298,6 +326,23 @@ sub tuneCurrentChannel()
     if m.rows.Count() = 0 then return
     cancelPendingTune()
     row = m.rows[m.currentChannel]
+    currentIndex = closestProgramIndex(m.currentChannel, m.nowPixel)
+    programTitle = row.channel_name
+    artwork = row.artwork_url
+    if row.programs <> invalid and row.programs.Count() > currentIndex
+        program = row.programs[currentIndex]
+        programTitle = program.display_title
+        if programTitle = invalid or programTitle = "" then programTitle = program.title
+        if program.artwork_url <> invalid and program.artwork_url <> "" then artwork = program.artwork_url
+    end if
+    m.pendingHudTitle = "CH " + row.channel_number + "  " + programTitle
+    m.pendingArtwork = artwork
+    showTuningHud()
+    if row.is_tunable = false
+        m.top.FindNode("hudStatus").text = "GUIDE LISTING"
+        m.hudTimer.control = "start"
+        return
+    end if
     m.isTuning = true
     m.top.FindNode("status").text = "Tuning channel " + row.channel_number + "…"
     m.playTask = CreateObject("roSGNode", "RequestTask")
@@ -321,7 +366,7 @@ sub onPlaybackReady(event)
     content.url = url
     content.streamFormat = "hls"
     content.live = true
-    m.pendingHudTitle = "CH " + m.rows[m.currentChannel].channel_number + "  " + m.rows[m.currentChannel].channel_name
+    if m.pendingHudTitle = "" then m.pendingHudTitle = "CH " + m.rows[m.currentChannel].channel_number + "  " + m.rows[m.currentChannel].channel_name
     if result.now <> invalid
         content.title = result.now.program_title
         m.pendingHudTitle = "CH " + result.now.channel_number + "  " + result.now.program_title
@@ -387,9 +432,18 @@ sub finishBufferedTune(which as String, node as Object)
     m.pendingSessionId = ""
     m.pendingVideoId = ""
     m.top.FindNode("hudTitle").text = m.pendingHudTitle
+    m.top.FindNode("hudStatus").text = ""
+    if m.pendingArtwork <> invalid and m.pendingArtwork <> "" then m.top.FindNode("hudArtwork").uri = m.server + m.pendingArtwork
+    m.activeHudTitle = m.pendingHudTitle
+    m.activeArtwork = m.pendingArtwork
+    m.pendingHudTitle = ""
+    m.pendingArtwork = ""
     m.inPlayer = true
     closeGuideOverlay()
     showPlayerHud()
+    prewarmAdjacentChannels()
+    m.adjacentTimer.control = "stop"
+    m.adjacentTimer.control = "start"
     cleanupSession(oldSessionId)
 end sub
 
@@ -398,6 +452,15 @@ sub showPlayerHud()
     m.top.FindNode("playerHud").visible = true
     m.hudTimer.control = "stop"
     m.hudTimer.control = "start"
+end sub
+
+sub showTuningHud()
+    if m.guideVisible then return
+    m.hudTimer.control = "stop"
+    m.top.FindNode("hudTitle").text = m.pendingHudTitle
+    m.top.FindNode("hudStatus").text = "TUNING"
+    if m.pendingArtwork <> invalid and m.pendingArtwork <> "" then m.top.FindNode("hudArtwork").uri = m.server + m.pendingArtwork
+    m.top.FindNode("playerHud").visible = true
 end sub
 
 sub hidePlayerHud()
@@ -441,6 +504,14 @@ sub cancelPendingTune()
     cleanupSession(m.pendingSessionId)
     m.pendingSessionId = ""
     m.pendingVideoId = ""
+    m.pendingHudTitle = ""
+    m.pendingArtwork = ""
+    if m.inPlayer
+        m.top.FindNode("hudTitle").text = m.activeHudTitle
+        m.top.FindNode("hudStatus").text = ""
+        if m.activeArtwork <> "" then m.top.FindNode("hudArtwork").uri = m.server + m.activeArtwork
+        showPlayerHud()
+    end if
     m.top.FindNode("status").text = ""
 end sub
 
@@ -459,6 +530,7 @@ sub stopPlayback()
     m.videoB.control = "stop"
     m.videoB.visible = false
     m.top.FindNode("playerHud").visible = false
+    m.adjacentTimer.control = "stop"
     m.top.FindNode("status").text = ""
     m.inPlayer = false
     cleanupSession(m.sessionId)
@@ -470,7 +542,14 @@ sub onRequestError(event)
     m.isTuning = false
     message = event.GetData()
     m.top.FindNode("status").text = message
-    if m.inPlayer then m.top.FindNode("playerHud").visible = true
+    m.pendingHudTitle = ""
+    m.pendingArtwork = ""
+    if m.inPlayer
+        m.top.FindNode("hudTitle").text = m.activeHudTitle
+        m.top.FindNode("hudStatus").text = "TUNE FAILED"
+        if m.activeArtwork <> "" then m.top.FindNode("hudArtwork").uri = m.server + m.activeArtwork
+        showPlayerHud()
+    end if
 end sub
 
 sub updateClock()

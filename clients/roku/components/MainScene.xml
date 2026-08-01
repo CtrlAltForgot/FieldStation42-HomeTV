@@ -25,9 +25,11 @@
       <Label id="status" translation="[530,285]" width="1300" color="#62D5FF" font="font:SmallSystemFont" />
     </Group>
     <Group id="playerHud" visible="false">
-      <Rectangle translation="[0,0]" width="1920" height="115" color="#07111DCC" />
-      <Label id="hudTitle" translation="[55,28]" width="1500" height="50" color="#FFFFFF" font="font:MediumBoldSystemFont" />
-      <Label translation="[55,78]" width="1500" text="Back: Guide    Rewind: Previous channel    Fast-forward: Next channel" color="#AAB9C7" font="font:SmallSystemFont" />
+      <Rectangle translation="[0,0]" width="1920" height="155" color="#07111DEB" />
+      <Label id="hudTitle" translation="[55,22]" width="1450" height="50" color="#FFFFFF" font="font:MediumBoldSystemFont" />
+      <Label id="hudStatus" translation="[55,70]" width="800" height="32" color="#62D5FF" font="font:SmallBoldSystemFont" />
+      <Label translation="[55,108]" width="1450" text="Back: Guide    Rewind: Previous channel    Fast-forward: Next channel" color="#AAB9C7" font="font:SmallSystemFont" />
+      <Poster id="hudArtwork" translation="[1600,15]" width="260" height="125" loadDisplayMode="scaleToZoom" />
     </Group>
   </children>
 </component>

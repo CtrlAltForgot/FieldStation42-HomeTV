@@ -17,6 +17,15 @@ router = APIRouter(prefix="/api/tv", tags=["tv-clients"])
 ROKU_GUIDE_WINDOW_SECONDS = 10_800
 ROKU_GUIDE_TRACK_WIDTH = 1_490
 
+STATION_TYPE_LABELS = {
+    "standard": "Scheduled programming",
+    "loop": "Continuous programming",
+    "web": "Web channel",
+    "guide": "Program guide",
+    "streaming": "Streaming channel",
+    "live_news": "Live news coverage",
+}
+
 
 def _iso(value: dt.datetime) -> str:
     return value.replace(microsecond=0).isoformat()
@@ -107,6 +116,25 @@ def roku_card_rect(
     return visible_start, max(72, visible_end - visible_start - 6)
 
 
+def _station_placeholder(station: dict, start: dt.datetime, end: dt.datetime) -> dict:
+    """Give schedule-less stations a real, channel-specific guide card."""
+    station_type = station.get("network_type", "standard")
+    title = station.get("network_long_name") or station["network_name"]
+    detail = STATION_TYPE_LABELS.get(station_type, "Channel programming")
+    return {
+        "title": title,
+        "display_title": title,
+        "program_details": detail,
+        "meta": {"description": detail},
+        "start_time": start,
+        "end_time": end,
+        "artwork_url": (
+            f"/api/watch/channels/{station['channel_number']}/artwork"
+        ),
+        "airing_kind": station_type,
+    }
+
+
 @router.get("/config")
 async def config():
     return {
@@ -157,21 +185,25 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
     current_offset_second = int((now - start).total_seconds())
     rows = []
     for station in StationManager().stations:
-        if station.get("hidden") or not (
-            station.get("_has_schedule")
-            or station.get("network_type") == "live_news"
-        ):
+        if station.get("hidden"):
             continue
-        payload = _schedule_payload(
-            station["network_name"], _iso(start), _iso(end), True, True
-        )
-        programs = payload.get("schedule_blocks", [])
-        if station.get("network_type") == "live_news":
+        has_schedule = bool(station.get("_has_schedule"))
+        station_type = station.get("network_type", "standard")
+        if has_schedule or station_type == "live_news":
+            payload = _schedule_payload(
+                station["network_name"], _iso(start), _iso(end), True, True
+            )
+            programs = payload.get("schedule_blocks", [])
+        else:
+            payload = {"error": None}
+            programs = []
+        has_programs = bool(programs)
+        if station_type == "live_news":
             for program in programs:
                 program["artwork_url"] = (
                     f"/api/watch/channels/{station['channel_number']}/artwork"
                 )
-        else:
+        elif programs:
             missing = [
                 getattr(program, "display_title", None)
                 or getattr(program, "title", "Unknown program")
@@ -184,6 +216,8 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
                     "Canonical artwork index is incomplete for: "
                     + ", ".join(dict.fromkeys(missing[:5])),
                 )
+        if not programs:
+            programs = [_station_placeholder(station, start, end)]
         programs = [
             _compact_tv_program(program, start, current_offset_second)
             for program in programs
@@ -193,7 +227,12 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
             "channel_name": station.get("network_long_name")
             or station["network_name"],
             "network_name": station["network_name"],
-            "is_live_source": station.get("network_type") == "live_news",
+            "network_type": station_type,
+            "is_live_source": station_type == "live_news",
+            "is_tunable": bool(
+                station_type == "live_news"
+                or (has_schedule and has_programs and not payload.get("error"))
+            ),
             "artwork_url": (
                 f"/api/watch/channels/{station['channel_number']}/artwork"
             ),

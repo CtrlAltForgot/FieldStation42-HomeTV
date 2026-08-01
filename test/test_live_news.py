@@ -13,6 +13,7 @@ from fs42.live_news import (
 from fs42.fs42_server.api.live_news import InstallRequest, install
 from fs42.fs42_server.api.schedules import get_schedule_by_query
 from fs42.fs42_server.api.tv import guide as tv_guide
+from fs42.fs42_server.api.watch import _station_artwork_svg
 from fs42.fs42_server.api.watch import SessionRequest, create_session, prewarm
 
 
@@ -187,6 +188,48 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["channels"][0]["channel_name"], "CBS News 24/7")
         self.assertEqual(result["channels"][0]["programs"][0]["airing_kind"], "live")
 
+    async def test_tv_guide_includes_every_visible_scheduleless_station_type(self):
+        stations = [
+            {
+                "network_name": f"Test {kind}",
+                "channel_number": channel,
+                "network_type": kind,
+                "_has_schedule": False,
+                "_has_catalog": False,
+            }
+            for channel, kind in enumerate(
+                ("guide", "web", "streaming"), start=30
+            )
+        ]
+        manager = FakeStationManager(stations)
+        with patch("fs42.fs42_server.api.tv.StationManager", return_value=manager):
+            result = await tv_guide(6)
+        self.assertEqual(
+            [row["network_type"] for row in result["channels"]],
+            ["guide", "web", "streaming"],
+        )
+        self.assertTrue(all(len(row["programs"]) == 1 for row in result["channels"]))
+        self.assertTrue(all(not row["is_tunable"] for row in result["channels"]))
+        self.assertEqual(
+            result["channels"][0]["programs"][0]["program_details"],
+            "Program guide",
+        )
+
+    def test_resolver_lists_scheduleless_channels_and_artwork_is_channel_specific(self):
+        station = {
+            "network_name": "Grandma's Guide",
+            "channel_number": 30,
+            "network_type": "guide",
+            "_has_schedule": False,
+        }
+        resolver = ScheduleResolver(FakeStationManager([station]))
+        self.assertEqual(resolver.channels()[0]["network_type"], "guide")
+        self.assertFalse(resolver.channels()[0]["is_tunable"])
+        self.assertEqual(resolver.station("30"), station)
+        artwork = _station_artwork_svg(station)
+        self.assertIn("Grandma&#x27;s Guide", artwork)
+        self.assertIn("CH 30", artwork)
+
     async def test_installer_is_collision_safe_and_idempotent(self):
         ordinary = {"network_name": "Existing", "channel_number": 20, "network_type": "standard"}
         manager = FakeStationManager([ordinary])
@@ -356,7 +399,7 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
         scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
         self.assertLess(scene.index('id="videoA"'), scene.index('id="guideLayer"'))
-        self.assertIn('color="#07111DCC"', scene)
+        self.assertIn('color="#07111DEB"', scene)
         self.assertIn('color="#07111DE8"', scene)
         self.assertIn("m.hudTimer.duration = 6", roku)
         self.assertIn("showGuideOverlay()", roku)
@@ -382,6 +425,19 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertNotIn("stopPlayback()", tune)
         self.assertIn("if m.currentChannel < 0 then m.currentChannel = m.rows.Count() - 1", roku)
         self.assertIn("if m.currentChannel >= m.rows.Count() then m.currentChannel = 0", roku)
+
+    def test_roku_tune_feedback_is_immediate_and_adjacent_channels_stay_warm(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
+        self.assertIn('id="hudStatus"', scene)
+        self.assertIn('id="hudArtwork"', scene)
+        tune = roku[roku.index("sub tuneCurrentChannel()"):
+                    roku.index("sub onPlaybackReady")]
+        self.assertLess(tune.index("showTuningHud()"), tune.index('m.playTask.control = "run"'))
+        self.assertIn('FindNode("hudStatus").text = "TUNING"', roku)
+        self.assertIn("prewarmAdjacentChannels()", roku)
+        self.assertIn("m.adjacentTimer.duration = 20", roku)
+        self.assertIn("m.adjacentTimer.repeat = true", roku)
 
     def test_tv_client_packages_have_required_manifests(self):
         manifest = open("clients/roku/manifest", encoding="utf-8").read()
