@@ -239,6 +239,19 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertNotIn('row.artwork_url + "?at="', roku)
         self.assertNotIn('channel.artwork_url +', webos)
 
+    def test_tv_clients_render_real_proportional_timeline_grids(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        webos = open("clients/webos/app.js", encoding="utf-8").read()
+        tv_api = open("fs42/fs42_server/api/tv.py", encoding="utf-8").read()
+        self.assertIn("guide_start_minute", roku)
+        self.assertIn("guide_end_minute", roku)
+        self.assertIn("m.pixelsPerMinute", roku)
+        self.assertIn("program.program_description", roku)
+        self.assertIn("guide_start_minute", webos)
+        self.assertIn("windowMinutes", webos)
+        self.assertIn("item.program_description", webos)
+        self.assertIn('"timeline"', tv_api)
+
     def test_live_news_embed_cannot_capture_controls_or_pause(self):
         player = open(
             "fs42/fs42_server/static/live_news_player.html", encoding="utf-8"

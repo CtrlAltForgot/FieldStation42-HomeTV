@@ -40,6 +40,7 @@ from fs42.fs42_server.api.watch import (
 )
 from fs42.fs42_server.api import build as build_api
 from fs42.fs42_server.api import settings as settings_api
+from fs42.fs42_server.api.tv import _compact_tv_program
 from fs42.fs42_server.api.schedules import (
     _attach_meta,
     _episode_display,
@@ -2069,6 +2070,21 @@ class WatchAPITests(unittest.TestCase):
                 self.request,
             ))
         self.assertEqual(raised.exception.status_code, 422)
+
+
+class TVGuideAPITests(unittest.TestCase):
+    def test_compact_program_keeps_summary_and_timeline_geometry(self):
+        start = dt.datetime(2026, 8, 1, 16, 0)
+        program = SimpleNamespace(
+            start_time=start - dt.timedelta(minutes=10),
+            end_time=start + dt.timedelta(minutes=20),
+            meta={"plot": "A complete episode summary."},
+        )
+        compact = _compact_tv_program(program, start)
+        self.assertEqual(compact["guide_start_minute"], -10)
+        self.assertEqual(compact["guide_end_minute"], 20)
+        self.assertEqual(compact["program_description"], "A complete episode summary.")
+        self.assertNotIn("meta", compact)
 
 
 class BuildOperationTests(unittest.TestCase):

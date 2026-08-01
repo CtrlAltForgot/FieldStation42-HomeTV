@@ -2,7 +2,9 @@
   "use strict";
   function $(selector) { return document.querySelector(selector); }
   var server = localStorage.getItem("myhometv-server") || "http://192.168.1.254:4243";
-  var rows = [], row = 0, program = 0, pane = "channels", sessionId = null;
+  var rows = [], timeline = [], row = 0, program = 0, sessionId = null;
+  var windowOffset = 0, windowMinutes = 180;
+  var autoFollowNow = true, guideLoadedAt = 0, lastGuideShift = 0;
   var video = $("#video");
 
   function api(path, options) {
@@ -19,20 +21,52 @@
   }
 
   function render() {
+    renderTimeline();
     var first = Math.max(0, Math.min(row - 3, rows.length - 7));
     $("#epg").innerHTML = rows.slice(first, first + 7).map(function (channel, offset) {
       var rowIndex = first + offset;
       var entries = channel.programs || [];
-      var selected = rowIndex === row ? program : 0;
-      var programFirst = Math.max(0, Math.min(selected - 1, entries.length - 5));
-      var cards = entries.slice(programFirst, programFirst + 5).map(function (item, itemOffset) {
-        var itemIndex = programFirst + itemOffset;
+      var cards = entries.map(function (item, itemIndex) {
+        var starts = Number(item.guide_start_minute);
+        var ends = Number(item.guide_end_minute);
+        var visibleStart = Math.max(starts, windowOffset);
+        var visibleEnd = Math.min(ends, windowOffset + windowMinutes);
+        if (!isFinite(starts) || visibleEnd <= visibleStart) return "";
         var focused = rowIndex === row && itemIndex === program;
-        return '<div class="program-card ' + (focused ? "focus" : "") + '"><strong>' + escapeHtml(titleOf(item)) + '</strong><span>' + escapeHtml(item.program_details || "") + '</span></div>';
+        var left = 100 * (visibleStart - windowOffset) / windowMinutes;
+        var width = Math.max(5, 100 * (visibleEnd - visibleStart) / windowMinutes);
+        var details = (item.guide_time || "") + (item.program_details ? " · " + item.program_details : "");
+        return '<div class="program-card ' + (focused ? "focus" : "") + '" style="left:' + left + '%;width:calc(' + width + '% - 5px)"><strong>' + escapeHtml(titleOf(item)) + '</strong><span>' + escapeHtml(details) + '</span></div>';
       }).join("") || '<div class="program-card empty">No programming available</div>';
       return '<div class="epg-row"><div class="channel-card">' + escapeHtml(channel.channel_number + "  " + channel.channel_name) + '</div><div class="program-strip">' + cards + '</div></div>';
     }).join("");
     showDetails();
+  }
+
+  function renderTimeline() {
+    $("#timeline").innerHTML = timeline.map(function (tick) {
+      if (tick.minute < windowOffset || tick.minute > windowOffset + windowMinutes) return "";
+      var left = 100 * (tick.minute - windowOffset) / windowMinutes;
+      return '<span style="left:' + left + '%">' + escapeHtml(tick.label) + '</span>';
+    }).join("");
+  }
+
+  function ensureVisible(item) {
+    if (!item) return;
+    var starts = Number(item.guide_start_minute), ends = Number(item.guide_end_minute);
+    if (starts < windowOffset) windowOffset = Math.max(0, starts);
+    else if (ends > windowOffset + windowMinutes) windowOffset = Math.max(0, starts - 30);
+  }
+
+  function closestProgram(rowIndex, target) {
+    var entries = rows[rowIndex] && rows[rowIndex].programs || [];
+    var closest = 0, best = Infinity;
+    entries.forEach(function (item, index) {
+      var starts = Number(item.guide_start_minute), ends = Number(item.guide_end_minute);
+      var distance = target < starts ? starts - target : target > ends ? target - ends : 0;
+      if (distance < best) { best = distance; closest = index; }
+    });
+    return closest;
   }
 
   function escapeHtml(value) {
@@ -46,9 +80,8 @@
     if (!channel) return;
     var item = (channel.programs || [])[program];
     $("#title").textContent = item ? titleOf(item) : channel.channel_name;
-    $("#details").textContent = item && item.program_details || "No programming available";
-    var metadata = item && item.meta || {};
-    $("#description").textContent = metadata.plot || metadata.description || "";
+    $("#details").textContent = item ? (item.guide_time_range || "") + (item.program_details ? " · " + item.program_details : "") : "No programming available";
+    $("#description").textContent = item && item.program_description || "";
     var art = item && item.artwork_url;
     if (art) $("#artwork").src = server + art;
   }
@@ -57,6 +90,9 @@
     $("#status").textContent = "Connecting to " + server + "…";
     return api("/api/tv/guide?hours=6").then(function (result) {
       rows = result.channels || [];
+      timeline = result.timeline || [];
+      windowOffset = Number(result.current_offset_minute || 0);
+      guideLoadedAt = Date.now(); lastGuideShift = guideLoadedAt;
       row = Math.min(row, Math.max(0, rows.length - 1));
       program = 0;
       $("#status").textContent = "Ready";
@@ -126,14 +162,24 @@
       return;
     }
     if ([13,37,38,39,40,403,404,405,406,427,428,461].indexOf(key) >= 0) event.preventDefault();
-    if (key === 37) program = Math.max(0, program - 1);
+    if (key === 37) {
+      autoFollowNow = false;
+      program = Math.max(0, program - 1);
+      ensureVisible(rows[row] && rows[row].programs[program]);
+    }
     else if (key === 39) {
+      autoFollowNow = false;
       var rowLength = rows[row] && rows[row].programs && rows[row].programs.length || 1;
       program = Math.min(rowLength - 1, program + 1);
+      ensureVisible(rows[row] && rows[row].programs[program]);
     } else if (key === 38) {
-      row = Math.max(0,row-1); program=0;
+      var current = rows[row] && rows[row].programs[program];
+      var target = current ? (Number(current.guide_start_minute) + Number(current.guide_end_minute)) / 2 : windowOffset;
+      row = Math.max(0,row-1); program=closestProgram(row, target);
     } else if (key === 40) {
-      row=Math.min(rows.length-1,row+1); program=0;
+      var selected = rows[row] && rows[row].programs[program];
+      var selectedTarget = selected ? (Number(selected.guide_start_minute) + Number(selected.guide_end_minute)) / 2 : windowOffset;
+      row=Math.min(rows.length-1,row+1); program=closestProgram(row, selectedTarget);
     } else if (key === 13) tune();
     else if (key === 405) openSettings();
     else if (key === 427) changeChannel(1);
@@ -142,6 +188,10 @@
   });
   setInterval(function () {
     $("#clock").textContent = new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+    if (autoFollowNow && guideLoadedAt && Date.now() - lastGuideShift >= 10000) {
+      windowOffset += (Date.now() - lastGuideShift) / 60000;
+      lastGuideShift = Date.now(); render();
+    }
   }, 1000);
   loadGuide();
 }());

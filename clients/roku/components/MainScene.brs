@@ -13,6 +13,14 @@ sub init()
     m.rows = []
     m.currentChannel = 0
     m.currentProgram = 0
+    m.timeline = []
+    m.windowOffset = 0
+    m.windowMinutes = 180
+    m.trackWidth = 1490
+    m.pixelsPerMinute = m.trackWidth / m.windowMinutes
+    m.autoFollowNow = true
+    m.guideLoadedSeconds = 0
+    m.lastGuideShift = -1
     m.sessionId = ""
     m.inPlayer = false
     loadGuide()
@@ -44,6 +52,9 @@ sub onGuideLoaded(event)
     data = event.GetData()
     if data = invalid or data.channels = invalid then return
     m.rows = data.channels
+    if data.timeline <> invalid then m.timeline = data.timeline
+    if data.current_offset_minute <> invalid then m.windowOffset = data.current_offset_minute
+    m.guideLoadedSeconds = CreateObject("roDateTime").AsSeconds()
     root = CreateObject("roSGNode", "ContentNode")
     for each row in m.rows
         item = root.CreateChild("ContentNode")
@@ -53,6 +64,7 @@ sub onGuideLoaded(event)
     m.top.FindNode("status").text = "Ready"
     m.top.SetFocus(true)
     onChannelFocused(invalid)
+    renderTimeline()
     renderGuideGrid()
 end sub
 
@@ -84,6 +96,28 @@ sub onProgramFocused(event)
     showProgram(m.programs.itemFocused)
 end sub
 
+function closestProgramIndex(rowIndex as Integer, targetMinute as Float) as Integer
+    if rowIndex < 0 or rowIndex >= m.rows.Count() then return 0
+    programs = m.rows[rowIndex].programs
+    if programs = invalid or programs.Count() = 0 then return 0
+    closest = 0
+    best = 999999.0
+    for index = 0 to programs.Count() - 1
+        starts = programs[index].guide_start_minute
+        ends = programs[index].guide_end_minute
+        if starts <> invalid and ends <> invalid
+            distance = 0.0
+            if targetMinute < starts then distance = starts - targetMinute
+            if targetMinute > ends then distance = targetMinute - ends
+            if distance < best
+                best = distance
+                closest = index
+            end if
+        end if
+    end for
+    return closest
+end function
+
 function addGuideLabel(group as Object, value as String, x as Integer, y as Integer, width as Integer, color as String, font as String) as Object
     label = CreateObject("roSGNode", "Label")
     label.text = value
@@ -97,6 +131,42 @@ function addGuideLabel(group as Object, value as String, x as Integer, y as Inte
     group.AppendChild(label)
     return label
 end function
+
+sub renderTimeline()
+    timeline = m.top.FindNode("timeline")
+    count = timeline.GetChildCount()
+    if count > 0 then timeline.RemoveChildrenIndex(count, 0)
+    for each tick in m.timeline
+        minute = tick.minute
+        if minute >= m.windowOffset and minute <= m.windowOffset + m.windowMinutes
+            x = Int((minute - m.windowOffset) * m.pixelsPerMinute)
+            addGuideLabel(timeline, tick.label, x + 8, 0, 180, "#AAB9C7", "font:SmallSystemFont")
+            marker = CreateObject("roSGNode", "Rectangle")
+            marker.translation = [x, 35]
+            marker.width = 1
+            marker.height = 625
+            marker.color = "#2B4154"
+            timeline.AppendChild(marker)
+        end if
+    end for
+end sub
+
+sub ensureProgramVisible(programData as Object)
+    starts = programData.guide_start_minute
+    ends = programData.guide_end_minute
+    if starts = invalid or ends = invalid then return
+    changed = false
+    if starts < m.windowOffset
+        m.windowOffset = starts
+        if m.windowOffset < 0 then m.windowOffset = 0
+        changed = true
+    else if ends > m.windowOffset + m.windowMinutes
+        m.windowOffset = starts - 30
+        if m.windowOffset < 0 then m.windowOffset = 0
+        changed = true
+    end if
+    if changed then renderTimeline()
+end sub
 
 sub renderGuideGrid()
     grid = m.top.FindNode("guideGrid")
@@ -123,31 +193,38 @@ sub renderGuideGrid()
         if programs = invalid or programs.Count() = 0
             addGuideLabel(grid, "No programming available", 280, y + 7, 1440, "#8195A7", "font:SmallSystemFont")
         else
-            selectedProgram = 0
-            if rowIndex = m.currentChannel then selectedProgram = m.currentProgram
-            firstProgram = selectedProgram - 1
-            if firstProgram < 0 then firstProgram = 0
-            if firstProgram > programs.Count() - 5 then firstProgram = programs.Count() - 5
-            if firstProgram < 0 then firstProgram = 0
-            for column = 0 to 4
-                programIndex = firstProgram + column
-                if programIndex >= programs.Count() then exit for
+            for programIndex = 0 to programs.Count() - 1
                 programData = programs[programIndex]
-                x = 270 + (column * 298)
+                starts = programData.guide_start_minute
+                ends = programData.guide_end_minute
+                if starts = invalid or ends = invalid then goto nextProgram
+                visibleStart = starts
+                if visibleStart < m.windowOffset then visibleStart = m.windowOffset
+                visibleEnd = ends
+                if visibleEnd > m.windowOffset + m.windowMinutes then visibleEnd = m.windowOffset + m.windowMinutes
+                if visibleEnd <= visibleStart then goto nextProgram
+                x = 270 + Int((visibleStart - m.windowOffset) * m.pixelsPerMinute)
+                width = Int((visibleEnd - visibleStart) * m.pixelsPerMinute) - 6
+                if width < 72 then width = 72
+                if x + width > 1760 then width = 1760 - x
                 card = CreateObject("roSGNode", "Rectangle")
                 card.translation = [x, y]
-                card.width = 290
+                card.width = width
                 card.height = 78
                 card.color = "#202D3A"
                 if rowIndex = m.currentChannel and programIndex = m.currentProgram then card.color = "#1675B8"
                 grid.AppendChild(card)
                 title = programData.display_title
                 if title = invalid or title = "" then title = programData.title
-                addGuideLabel(grid, title, x + 14, y + 2, 262, "#FFFFFF", "font:SmallBoldSystemFont")
+                addGuideLabel(grid, title, x + 14, y + 2, width - 24, "#FFFFFF", "font:SmallBoldSystemFont")
                 detail = programData.program_details
                 if detail = invalid then detail = ""
-                detailLabel = addGuideLabel(grid, detail, x + 14, y + 37, 262, "#AAB9C7", "font:TinySystemFont")
+                timeLabel = programData.guide_time
+                if timeLabel = invalid then timeLabel = ""
+                if detail <> "" then timeLabel = timeLabel + " · " + detail
+                detailLabel = addGuideLabel(grid, timeLabel, x + 14, y + 37, width - 24, "#AAB9C7", "font:TinySystemFont")
                 detailLabel.height = 35
+                nextProgram:
             end for
         end if
     end for
@@ -167,12 +244,12 @@ sub showProgram(index as Integer)
     m.top.FindNode("programTitle").text = title
     details = program.program_details
     if details = invalid then details = ""
-    m.top.FindNode("programDetails").text = details
-    description = ""
-    if program.meta <> invalid
-        if program.meta.plot <> invalid then description = program.meta.plot
-        if description = "" and program.meta.description <> invalid then description = program.meta.description
-    end if
+    timeRange = program.guide_time_range
+    if timeRange = invalid then timeRange = ""
+    if details <> "" then timeRange = timeRange + " · " + details
+    m.top.FindNode("programDetails").text = timeRange
+    description = program.program_description
+    if description = invalid then description = ""
     m.top.FindNode("programDescription").text = description
     art = program.artwork_url
     if art <> invalid and art <> "" then m.top.FindNode("artwork").uri = m.server + art
@@ -267,6 +344,17 @@ sub updateClock()
     minutes = now.GetMinutes().ToStr()
     if Len(minutes) = 1 then minutes = "0" + minutes
     m.top.FindNode("clock").text = displayHour.ToStr() + ":" + minutes + suffix
+    if m.autoFollowNow and m.guideLoadedSeconds > 0 and m.rows.Count() > 0
+        elapsed = (now.AsSeconds() - m.guideLoadedSeconds) / 60.0
+        shifted = Int((m.windowOffset + elapsed) * 6)
+        if shifted <> m.lastGuideShift
+            m.windowOffset = m.windowOffset + elapsed
+            m.guideLoadedSeconds = now.AsSeconds()
+            m.lastGuideShift = shifted
+            renderTimeline()
+            renderGuideGrid()
+        end if
+    end if
 end sub
 
 sub changeChannel(delta as Integer)
@@ -315,27 +403,44 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         return true
     end if
     if key = "up"
+        targetMinute = m.windowOffset
+        currentPrograms = m.rows[m.currentChannel].programs
+        if currentPrograms <> invalid and currentPrograms.Count() > m.currentProgram
+            targetMinute = (currentPrograms[m.currentProgram].guide_start_minute + currentPrograms[m.currentProgram].guide_end_minute) / 2
+        end if
         m.currentChannel = m.currentChannel - 1
         if m.currentChannel < 0 then m.currentChannel = 0
-        m.currentProgram = 0
         onChannelFocused(invalid)
+        m.currentProgram = closestProgramIndex(m.currentChannel, targetMinute)
+        showProgram(m.currentProgram)
         renderGuideGrid()
         return true
     else if key = "down"
+        targetMinute = m.windowOffset
+        currentPrograms = m.rows[m.currentChannel].programs
+        if currentPrograms <> invalid and currentPrograms.Count() > m.currentProgram
+            targetMinute = (currentPrograms[m.currentProgram].guide_start_minute + currentPrograms[m.currentProgram].guide_end_minute) / 2
+        end if
         m.currentChannel = m.currentChannel + 1
         if m.currentChannel >= m.rows.Count() then m.currentChannel = m.rows.Count() - 1
-        m.currentProgram = 0
         onChannelFocused(invalid)
+        m.currentProgram = closestProgramIndex(m.currentChannel, targetMinute)
+        showProgram(m.currentProgram)
         renderGuideGrid()
         return true
     else if key = "right"
+        m.autoFollowNow = false
         programs = m.rows[m.currentChannel].programs
         if programs <> invalid and m.currentProgram < programs.Count() - 1 then m.currentProgram = m.currentProgram + 1
+        if programs <> invalid and programs.Count() > m.currentProgram then ensureProgramVisible(programs[m.currentProgram])
         showProgram(m.currentProgram)
         renderGuideGrid()
         return true
     else if key = "left"
+        m.autoFollowNow = false
         if m.currentProgram > 0 then m.currentProgram = m.currentProgram - 1
+        programs = m.rows[m.currentChannel].programs
+        if programs <> invalid and programs.Count() > m.currentProgram then ensureProgramVisible(programs[m.currentProgram])
         showProgram(m.currentProgram)
         renderGuideGrid()
         return true
