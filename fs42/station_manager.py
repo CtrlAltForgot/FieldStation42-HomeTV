@@ -57,6 +57,8 @@ class StationManager(object):
                 )
                 if os.environ.get("FS42_DB_PATH"):
                     self.server_conf["db_path"] = os.environ["FS42_DB_PATH"]
+                if os.environ.get("TMDB_API_KEY"):
+                    self.server_conf["tmdb_api_key"] = os.environ["TMDB_API_KEY"]
                 self.load_json_stations()
             self.guide_config = None
             for i in range(len(self.stations)):

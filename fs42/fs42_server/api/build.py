@@ -7,6 +7,7 @@ from fs42.catalog_api import CatalogAPI
 from fs42.liquid_manager import LiquidManager
 from fs42.liquid_schedule import LiquidSchedule
 from fs42.catalog import ShowCatalog
+from fs42.metadata_enrichment import MetadataEnricher
 
 router = APIRouter(prefix="/build", tags=["build"])
 
@@ -39,6 +40,24 @@ def _select_stations(network_name):
     return selected
 
 
+def _feature_paths(stations):
+    paths = []
+    for station in stations:
+        for entry in CatalogAPI.get_entries(station) or []:
+            if (
+                getattr(entry, "content_type", "feature") == "feature"
+                and getattr(entry, "media_type", "video") == "video"
+            ):
+                paths.append(entry.path)
+    return paths
+
+
+def _scan_metadata(stations, log, force=False):
+    enricher = MetadataEnricher()
+    paths = _feature_paths(stations) if enricher.helper.is_configured() else []
+    enricher.scan(paths, force=force, log=log)
+
+
 @router.post("/quick/{action}/{network_name}")
 async def quick_action(action: str, network_name: str, request: Request):
     actions = {
@@ -49,6 +68,7 @@ async def quick_action(action: str, network_name: str, request: Request):
         "add_day",
         "add_week",
         "add_month",
+        "scan_metadata",
     }
     if action not in actions:
         raise HTTPException(status_code=422, detail="Unknown quick action.")
@@ -95,6 +115,8 @@ async def quick_action(action: str, network_name: str, request: Request):
                 if amount and (should_generate or station.get("_has_schedule")):
                     log(f"Adding one {amount} to {name}.")
                     LiquidSchedule(station).add_amount(amount)
+            if action.startswith("rebuild") or action == "scan_metadata":
+                _scan_metadata(selected, log)
             LiquidManager().reload_schedules()
             command_queue = request.app.state.player_command_queue
             if command_queue:
@@ -181,6 +203,12 @@ async def rebuild_catalog(
                     )
                     with rebuild_tasks_lock:
                         rebuild_tasks[task_id]["log"] += f"Rebuilt catalog for {station['network_name']}\n"
+
+            def metadata_log(message):
+                with rebuild_tasks_lock:
+                    rebuild_tasks[task_id]["log"] += message + "\n"
+
+            _scan_metadata(to_rebuild, metadata_log)
 
             with rebuild_tasks_lock:
                 rebuild_tasks[task_id]["status"] = "done"

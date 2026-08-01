@@ -196,13 +196,13 @@ class StreamSession:
     created_at: float
     last_access: float
     broadcast_id: str = ""
-    broadcast_key: tuple[str, str, str] | None = None
+    broadcast_key: tuple[str, str, str, str] | None = None
 
 
 @dataclass
 class ChannelBroadcast:
     broadcast_id: str
-    key: tuple[str, str, str]
+    key: tuple[str, str, str, str]
     directory: Path
     process: subprocess.Popen
     media_path: str
@@ -214,6 +214,7 @@ class ChannelBroadcast:
 
 class HLSSessionManager:
     PROFILES = {"auto", "copy"}
+    SUBTITLE_MODES = {"auto", "english", "off"}
 
     def __init__(
         self,
@@ -242,7 +243,8 @@ class HLSSessionManager:
         )
         self.process_factory = process_factory
         self.sessions: dict[str, StreamSession] = {}
-        self.broadcasts: dict[tuple[str, str, str], ChannelBroadcast] = {}
+        self.broadcasts: dict[tuple[str, str, str, str], ChannelBroadcast] = {}
+        self._stream_probe_cache: dict[str, tuple[tuple[int, int], list[dict]]] = {}
         self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
         # A single production worker owns this cache. Remove only UUID-shaped
@@ -260,9 +262,12 @@ class HLSSessionManager:
         channel: str,
         profile: str = "auto",
         boundary_at: dt.datetime | None = None,
+        subtitle_mode: str = "auto",
     ) -> tuple[StreamSession, Airing]:
         if profile not in self.PROFILES:
             raise ValueError(f"Unknown client profile: {profile}")
+        if subtitle_mode not in self.SUBTITLE_MODES:
+            raise ValueError(f"Unknown subtitle mode: {subtitle_mode}")
         with self.lock:
             self.cleanup()
             airing = (
@@ -288,7 +293,12 @@ class HLSSessionManager:
             # Include the scheduled item boundary so the next item can be
             # prewarmed without terminating the broadcaster still serving the
             # final frames of the current ad.
-            key = (airing.channel_number, profile, airing.item_end.isoformat())
+            key = (
+                airing.channel_number,
+                profile,
+                airing.item_end.isoformat(),
+                subtitle_mode,
+            )
             broadcast = self.broadcasts.get(key)
             if broadcast is not None and (
                 broadcast.process.poll() is not None
@@ -303,7 +313,9 @@ class HLSSessionManager:
                     self._evict_unused_broadcast()
                 if len(self.broadcasts) >= self.max_sessions:
                     raise WatchError("The server has reached its channel broadcast limit")
-                broadcast = self._start_broadcast(key, airing, profile)
+                broadcast = self._start_broadcast(
+                    key, airing, profile, subtitle_mode
+                )
 
             session_id = str(uuid.uuid4())
             timestamp = time.monotonic()
@@ -330,13 +342,24 @@ class HLSSessionManager:
             return session, airing
 
     def _start_broadcast(
-        self, key: tuple[str, str, str], airing: Airing, profile: str
+        self,
+        key: tuple[str, str, str, str],
+        airing: Airing,
+        profile: str,
+        subtitle_mode: str,
     ) -> ChannelBroadcast:
         broadcast_id = str(uuid.uuid4())
         directory = self.root / broadcast_id
         directory.mkdir(mode=0o700)
-        streams = self._probe_streams(airing.media_path) if profile == "auto" else []
-        subtitle = self._select_english_subtitle(streams)
+        streams = (
+            self._cached_probe_streams(airing.media_path)
+            if profile == "auto" else []
+        )
+        subtitle = None
+        if subtitle_mode != "off":
+            subtitle = self._select_english_subtitle(
+                streams, require_foreign_audio=subtitle_mode == "auto"
+            )
         command = self._ffmpeg_command(
             airing, profile, directory, subtitle, streams
         )
@@ -402,9 +425,26 @@ class HLSSessionManager:
             return []
         return streams
 
+    def _cached_probe_streams(self, media_path: str) -> list[dict]:
+        try:
+            stat = os.stat(media_path)
+            signature = (stat.st_size, stat.st_mtime_ns)
+        except OSError:
+            return self._probe_streams(media_path)
+        cached = self._stream_probe_cache.get(media_path)
+        if cached and cached[0] == signature:
+            return cached[1]
+        streams = self._probe_streams(media_path)
+        if len(self._stream_probe_cache) >= 256:
+            self._stream_probe_cache.pop(next(iter(self._stream_probe_cache)))
+        self._stream_probe_cache[media_path] = (signature, streams)
+        return streams
+
     @staticmethod
-    def _select_english_subtitle(streams: list[dict]) -> tuple[str, int] | None:
-        """Select an English subtitle only for explicitly non-English audio."""
+    def _select_english_subtitle(
+        streams: list[dict], require_foreign_audio: bool = True
+    ) -> tuple[str, int] | None:
+        """Select the best full-dialogue English subtitle stream."""
         audio = next(
             (stream for stream in streams if stream.get("codec_type") == "audio"),
             None,
@@ -412,7 +452,13 @@ class HLSSessionManager:
         audio_language = (
             (audio or {}).get("tags", {}).get("language", "und").casefold()
         )
-        if audio_language in {"eng", "en", "und", ""}:
+        audio_title = (audio or {}).get("tags", {}).get("title", "").casefold()
+        if audio_language in {"und", ""}:
+            if any(word in audio_title for word in ("japanese", "jpn", "nihongo")):
+                audio_language = "jpn"
+            elif any(word in audio_title for word in ("english", "eng")):
+                audio_language = "eng"
+        if require_foreign_audio and audio_language in {"eng", "en", "und", ""}:
             return None
 
         subtitles = [
@@ -421,8 +467,10 @@ class HLSSessionManager:
         candidates = []
         for index, stream in enumerate(subtitles):
             language = stream.get("tags", {}).get("language", "").casefold()
+            title = stream.get("tags", {}).get("title", "").casefold()
+            if language in {"", "und"} and "english" in title:
+                language = "eng"
             if language in {"eng", "en"}:
-                title = stream.get("tags", {}).get("title", "").casefold()
                 disposition = stream.get("disposition", {})
                 score = 10 if disposition.get("default") else 0
                 if any(word in title for word in ("full", "dialogue", "dialog")):
@@ -647,6 +695,7 @@ class HLSSessionManager:
                     {
                         "channel": broadcast.key[0],
                         "profile": broadcast.key[1],
+                        "subtitles": broadcast.key[3],
                         "viewers": len(broadcast.leases),
                         "running": broadcast.process.poll() is None,
                         "segments": sum(
@@ -704,7 +753,7 @@ class HLSSessionManager:
         self._remove_broadcast(victim.key)
         return True
 
-    def _remove_broadcast(self, key: tuple[str, str, str] | None) -> None:
+    def _remove_broadcast(self, key: tuple[str, str, str, str] | None) -> None:
         broadcast = self.broadcasts.pop(key, None)
         if broadcast is None:
             return

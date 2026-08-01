@@ -2,6 +2,7 @@ import asyncio
 import datetime as dt
 import logging
 import mimetypes
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -16,6 +17,7 @@ from fs42.hometv import (
 )
 from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
+from fs42.metadata_enrichment import artwork_root
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
 LOG = logging.getLogger("HomeTV.Client")
@@ -29,6 +31,7 @@ class SessionRequest(BaseModel):
     channel: str
     profile: str = "auto"
     boundary_at: dt.datetime | None = None
+    subtitles: str = "auto"
 
 
 class ClientEvent(BaseModel):
@@ -114,6 +117,17 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
     except WatchError as exc:
         raise _watch_error(exc)
 
+    metadata = MetadataIO.read(str(approved)) or {}
+    artwork_file = Path(str(metadata.get("artwork_file", ""))).name
+    if artwork_file and re.fullmatch(r"[a-f0-9]{64}\.jpg", artwork_file):
+        managed_art = (artwork_root() / artwork_file).resolve()
+        if managed_art.parent == artwork_root() and managed_art.is_file():
+            return FileResponse(
+                managed_art,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "private, max-age=86400"},
+            )
+
     extensions = (".jpg", ".jpeg", ".png", ".webp")
     candidates = [approved.with_suffix(ext) for ext in extensions]
     for directory in (approved.parent, approved.parent.parent):
@@ -147,9 +161,18 @@ async def create_session(body: SessionRequest, request: Request):
             if abs((now - boundary_at).total_seconds()) > 120:
                 raise ValueError("Playback boundary is outside the live window")
         session, airing = (
-            manager.create(body.channel, body.profile, boundary_at=boundary_at)
+            manager.create(
+                body.channel,
+                body.profile,
+                boundary_at=boundary_at,
+                subtitle_mode=body.subtitles,
+            )
             if boundary_at is not None
-            else manager.create(body.channel, body.profile)
+            else manager.create(
+                body.channel,
+                body.profile,
+                subtitle_mode=body.subtitles,
+            )
         )
         for _ in range(PLAYLIST_READY_ATTEMPTS):
             if await request.is_disconnected():

@@ -1,9 +1,9 @@
 (() => {
   "use strict";
 
-  const WINDOW_MINUTES = 180;
+  const WINDOW_MINUTES = 240;
   const PIXELS_PER_MINUTE = 11;
-  const PREVIEW_DELAY = 850;
+  const PREVIEW_DELAY = 400;
   const REFRESH_INTERVAL = 60_000;
   const state = {
     stations: [], rows: [], rowIndex: 0, blockIndex: 0,
@@ -11,7 +11,10 @@
     previewTimer: null, previewSession: null, hls: null,
     requestToken: 0,
     previewEnabled: localStorage.getItem("fs42-guide-preview") !== "false",
-    previewActive: new URLSearchParams(window.location.search).get("embedded") !== "watch"
+    previewActive: !["watch", "compact"].includes(
+      new URLSearchParams(window.location.search).get("embedded") ||
+      (new URLSearchParams(window.location.search).has("compact") ? "compact" : "")
+    )
   };
   let channelDigits = "", channelDigitTimer = null;
 
@@ -281,6 +284,14 @@
         return;
       }
       state.previewSession = result.session_id;
+      const showVideo = () => {
+        if (token !== state.requestToken) return;
+        video.hidden = false;
+        art.hidden = true;
+        $("#preview-fallback").hidden = true;
+        $("#preview-loading").hidden = true;
+      };
+      video.addEventListener("playing", showVideo, {once: true});
       if (window.Hls && Hls.isSupported()) {
         state.hls = new Hls({liveSyncDurationCount: 1, maxBufferLength: 20, backBufferLength: 0});
         state.hls.loadSource(result.playlist_url);
@@ -290,14 +301,12 @@
         video.src = result.playlist_url;
         video.play().catch(() => {});
       }
-      video.hidden = false;
-      art.hidden = true;
-      $("#preview-fallback").hidden = true;
     } catch (error) {
       console.warn("Live guide preview unavailable", error);
       video.hidden = true;
-    } finally {
       if (token === state.requestToken) $("#preview-loading").hidden = true;
+    } finally {
+      if (token === state.requestToken && !video.hidden) $("#preview-loading").hidden = true;
     }
   }
 

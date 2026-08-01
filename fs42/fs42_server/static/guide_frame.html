@@ -15,12 +15,12 @@
     <section id="preview" aria-live="polite">
       <div id="preview-media">
         <img id="preview-art" alt="" hidden>
-        <video id="preview-video" autoplay muted playsinline hidden></video>
+        <video id="preview-video" autoplay muted playsinline disablepictureinpicture controlslist="nopictureinpicture" hidden></video>
         <div id="preview-fallback" aria-hidden="true">
           <span>CH</span><strong id="preview-channel">--</strong>
         </div>
         <span id="preview-status">GUIDE</span>
-        <div id="preview-loading" hidden>Loading preview…</div>
+        <div id="preview-loading" hidden><i></i><span>Preview loading</span></div>
       </div>
       <div id="preview-copy">
         <p id="preview-kicker">FIELDSTATION42</p>

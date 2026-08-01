@@ -21,6 +21,7 @@ button { font: inherit; }
 #guide-app { height: 100%; display: grid; grid-template-rows: var(--preview-height) minmax(0, 1fr); color: #f8fafc; background: #080c12; }
 
 #preview {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(320px, 34vw) minmax(0, 1fr) auto;
   gap: clamp(20px, 2.4vw, 42px);
@@ -51,7 +52,9 @@ button { font: inherit; }
 #preview-fallback strong { font-size: clamp(52px, 6vw, 92px); line-height: .96; text-shadow: 0 8px 28px rgba(0,0,0,.45); }
 #preview-status { position: absolute; z-index: 2; left: 14px; bottom: 12px; padding: 5px 9px; border-radius: 4px; background: #df2942; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
 #preview-status.upcoming { background: rgba(9,15,23,.85); }
-#preview-loading { position: absolute; z-index: 3; inset: 0; display: grid; place-content: center; color: #d8e2ec; background: rgba(3,7,11,.72); font-size: 13px; }
+#preview-loading { position: absolute; z-index: 3; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #e1eaf3; background: rgba(3,7,11,.76); box-shadow: 0 5px 20px rgba(0,0,0,.3); font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+#preview-loading i { width: 11px; height: 11px; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); border-radius: 50%; animation: preview-spin .8s linear infinite; }
+@keyframes preview-spin { to { transform: rotate(360deg); } }
 
 #preview-copy { min-width: 0; }
 #preview-kicker { margin: 0; color: #63d4ff; font-size: clamp(10px, .8vw, 13px); font-weight: 800; letter-spacing: .16em; }
@@ -61,11 +64,11 @@ button { font: inherit; }
 #preview-progress { width: min(680px, 100%); height: 3px; margin-top: 18px; overflow: hidden; border-radius: 3px; background: rgba(255,255,255,.13); }
 #preview-progress span { display: block; width: 0; height: 100%; background: var(--accent); box-shadow: 0 0 9px rgba(85,199,255,.65); }
 
-#preview-actions { align-self: end; display: grid; justify-items: stretch; gap: 8px; min-width: 145px; }
+#preview-actions { align-self: end; display: grid; justify-items: stretch; gap: 8px; min-width: 155px; padding-bottom: 24px; }
 #preview-actions button { min-height: 42px; padding: 9px 14px; border: 1px solid rgba(255,255,255,.15); border-radius: 8px; color: #eff7ff; background: #1b2633; font-size: 13px; font-weight: 750; cursor: pointer; }
 #preview-actions button:hover, #preview-actions button:focus-visible { border-color: var(--accent); outline: 2px solid rgba(85,199,255,.28); background: #23425f; }
 #watch-button { background: #1269b8 !important; }
-#preview-actions p { margin: 3px 0 0; color: #7f8c9b; font-size: 9px; line-height: 1.5; text-align: center; }
+#preview-actions p { position: absolute; right: clamp(24px, 3vw, 58px); bottom: 10px; margin: 0; color: #9aa8b8; font-size: 10px; line-height: 1.5; text-align: right; }
 kbd { padding: 1px 4px; border: 1px solid #485260; border-radius: 3px; color: #c7d0dc; font: inherit; }
 
 #listings { position: relative; min-height: 0; overflow: hidden; background: #06090e; }
@@ -105,4 +108,5 @@ kbd { padding: 1px 4px; border: 1px solid #485260; border-radius: 3px; color: #c
 @media (prefers-reduced-motion: reduce) {
   #guide-scroll { scroll-behavior: auto; }
   .program { transition: none; }
+  #preview-loading i { animation: none; }
 }

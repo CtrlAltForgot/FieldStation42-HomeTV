@@ -20,6 +20,7 @@ from fs42.hometv import (
     UnsafeMediaPath,
 )
 from fs42.media_processor import MediaProcessor
+from fs42.metadata_enrichment import MetadataEnricher
 from fs42.fs42_server.api.watch import (
     PLAYLIST_STARTUP_ATTEMPTS,
     PLAYLIST_STARTUP_INTERVAL,
@@ -811,6 +812,36 @@ class SessionTests(unittest.TestCase):
                 HLSSessionManager._english_subtitle("/media/show.mkv")
             )
 
+    def test_forced_english_mode_allows_subtitles_with_english_audio(self):
+        streams = [
+            {"codec_type": "audio", "tags": {"language": "eng"}},
+            {
+                "codec_type": "subtitle",
+                "codec_name": "ass",
+                "tags": {"language": "eng", "title": "English Full Dialogue"},
+            },
+        ]
+        self.assertEqual(
+            HLSSessionManager._select_english_subtitle(
+                streams, require_foreign_audio=False
+            ),
+            ("ass", 0),
+        )
+
+    def test_anime_track_titles_recover_missing_language_tags(self):
+        streams = [
+            {"codec_type": "audio", "tags": {"title": "Japanese 2.0"}},
+            {
+                "codec_type": "subtitle",
+                "codec_name": "ass",
+                "tags": {"title": "English Full Dialogue"},
+            },
+        ]
+        self.assertEqual(
+            HLSSessionManager._select_english_subtitle(streams),
+            ("ass", 0),
+        )
+
     def test_full_dialogue_subtitles_are_preferred_over_signs(self):
         streams = [
             {"codec_type": "audio", "tags": {"language": "jpn"}},
@@ -902,6 +933,71 @@ class DatabaseTests(unittest.TestCase):
                 connection.close()
 
 
+class MetadataEnrichmentTests(unittest.TestCase):
+    def test_episode_scan_uses_english_series_identity_and_episode_details(self):
+        class Helper:
+            def is_configured(self):
+                return True
+
+            def search_tv(self, title):
+                self.query = title
+                return {
+                    "tmdb_id": 1429,
+                    "name": "Attack on Titan",
+                    "original_name": "進撃の巨人",
+                    "overview": "Humanity shelters behind walls.",
+                    "first_air_date": "2013-04-07",
+                    "genre": ["Animation", "Action & Adventure"],
+                    "poster_url": None,
+                    "backdrop_url": None,
+                }
+
+            def get_tv_episode(self, tmdb_id, season, episode):
+                self.episode_request = (tmdb_id, season, episode)
+                return {
+                    "name": "To You, in 2000 Years",
+                    "overview": "The Colossal Titan appears.",
+                    "air_date": "2013-04-07",
+                    "still_url": None,
+                }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "meta.db")
+            media_path = str(
+                Path(temp_dir)
+                / "Shingeki No Kyojin"
+                / "Season 01"
+                / "Shingeki No Kyojin S01E01.mkv"
+            )
+            with connect(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE file_meta (path TEXT PRIMARY KEY, meta TEXT, "
+                    "media_type TEXT, last_checked TIMESTAMP)"
+                )
+                connection.execute(
+                    "INSERT INTO file_meta(path, meta, media_type) VALUES (?, '', 'video')",
+                    (os.path.realpath(media_path),),
+                )
+            helper = Helper()
+            enricher = MetadataEnricher(helper=helper, db_path=db_path)
+            enricher.art_dir = Path(temp_dir) / "art"
+            stats = enricher.scan([media_path])
+            with connect(db_path) as connection:
+                metadata = json.loads(
+                    connection.execute(
+                        "SELECT meta FROM file_meta WHERE path=?",
+                        (os.path.realpath(media_path),),
+                    ).fetchone()[0]
+                )
+            self.assertEqual(stats["updated"], 1)
+            self.assertEqual(metadata["show_title"], "Attack on Titan")
+            self.assertEqual(metadata["original_show_title"], "進撃の巨人")
+            self.assertEqual(metadata["title"], "To You, in 2000 Years")
+            self.assertEqual(metadata["season"], 1)
+            self.assertEqual(metadata["episode"], 1)
+            self.assertEqual(helper.episode_request, (1429, 1, 1))
+
+
 class WatchAPITests(unittest.TestCase):
     def setUp(self):
         manager = SimpleNamespace(
@@ -911,7 +1007,7 @@ class WatchAPITests(unittest.TestCase):
                     "channel_name": "Test TV",
                 }]
             ),
-            create=lambda channel, profile: (_ for _ in ()).throw(
+            create=lambda channel, profile, **_kwargs: (_ for _ in ()).throw(
                 ValueError("Unknown client profile")
             ),
         )

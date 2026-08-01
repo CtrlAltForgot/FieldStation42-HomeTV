@@ -13,6 +13,8 @@
   let recoveryAttempts = 0;
   let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
   let mutedAutoplayFallback = false;
+  let subtitleMode = localStorage.getItem("fs42-subtitles") || "auto";
+  if (!["auto", "english", "off"].includes(subtitleMode)) subtitleMode = "auto";
   let userMuted = localStorage.getItem("fs42-muted") === "true";
   const savedVolumeValue = localStorage.getItem("fs42-volume");
   const savedVolume = savedVolumeValue === null ? 1 : Number(savedVolumeValue);
@@ -204,7 +206,7 @@
         const result = await api("/api/watch/sessions", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({channel, profile: "auto", boundary_at: boundaryAt}),
+          body: JSON.stringify({channel, profile: "auto", boundary_at: boundaryAt, subtitles: subtitleMode}),
           signal: prefetchAbort.signal
         });
         pendingResult = result;
@@ -269,7 +271,8 @@
           body: JSON.stringify({
             channel: String(channel),
             profile: "auto",
-            boundary_at: boundaryAt
+            boundary_at: boundaryAt,
+            subtitles: subtitleMode
           }),
           signal
         });
@@ -399,6 +402,19 @@
     localStorage.setItem("fs42-volume", String(video.volume));
   };
   document.querySelector("#fullscreen").onclick = () => document.querySelector("#viewer").requestFullscreen();
+  function renderSubtitleMode() {
+    const labels = {auto: "CC Auto", english: "CC English", off: "CC Off"};
+    const button = document.querySelector("#subtitles");
+    button.querySelector("span").textContent = labels[subtitleMode];
+    button.setAttribute("aria-label", `Subtitles: ${labels[subtitleMode].replace("CC ", "")}`);
+  }
+  document.querySelector("#subtitles").onclick = () => {
+    const modes = ["auto", "english", "off"];
+    subtitleMode = modes[(modes.indexOf(subtitleMode) + 1) % modes.length];
+    localStorage.setItem("fs42-subtitles", subtitleMode);
+    renderSubtitleMode();
+    if (channelSelect.value) tune(channelSelect.value);
+  };
   function setGuideVisible(visible) {
     const guide = document.querySelector("#guide");
     guide.hidden = !visible;
@@ -433,6 +449,7 @@
     if (event.key.toLowerCase() === "m") document.querySelector("#mute").click();
     if (event.key.toLowerCase() === "f") document.querySelector("#fullscreen").click();
     if (event.key.toLowerCase() === "g") document.querySelector("#guide-button").click();
+    if (event.key.toLowerCase() === "c") document.querySelector("#subtitles").click();
   });
   function handleVideoError(event) {
     if (event.currentTarget !== video) return;
@@ -485,6 +502,7 @@
     "aria-label",
     userMuted ? "Unmute" : "Mute"
   );
+  renderSubtitleMode();
   showControls();
   start();
 })();

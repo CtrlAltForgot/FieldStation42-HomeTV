@@ -147,6 +147,17 @@ FieldStation42 installation:
 It uses normal bridge networking and has no X11, PulseAudio, or host-audio
 mounts.
 
+For automatic English metadata and cached guide artwork, add a TMDB v3 API
+key to `/mnt/user/appdata/fieldstation42-hometv/app/docker/.env`:
+
+```bash
+TMDB_API_KEY=your_key_here
+```
+
+Catalog rebuilds enrich only missing/incomplete entries. The management page's
+**Scan missing metadata** action performs the same incremental scan without
+resetting or regenerating schedules.
+
 From the staging repository on Unraid:
 
 ```bash

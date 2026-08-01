@@ -194,6 +194,19 @@ responses never contain an artwork filesystem path. After focus settles, a
 muted live preview may lease the shared channel broadcaster. Hidden embedded
 guides release their preview lease.
 
+Catalog rebuilds optionally enrich incomplete movie and episode records from
+TMDB when `TMDB_API_KEY` is configured. Existing complete metadata and cached
+artwork are skipped. Local NFO values retain precedence for episode facts,
+while TMDB's `en-US` series identity supplies consistent English names for
+anime and other foreign-language libraries. Artwork is downloaded once into
+the persistent catalog volume and referenced by an opaque hash.
+
+The Watch client offers `CC Auto`, `CC English`, and `CC Off`. Auto burns the
+best full-dialogue English subtitle only when audio is explicitly non-English;
+English forces that stream when available, and Off suppresses subtitle
+selection. Each mode has its own shared broadcast key so changing captions
+never changes another viewer's stream.
+
 ## Session lifecycle and cleanup
 
 Each viewer lease has an opaque UUID and activity timestamp. A shared channel
