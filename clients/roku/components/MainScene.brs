@@ -10,6 +10,7 @@ sub init()
     m.currentProgram = 0
     m.timeline = []
     m.windowOffsetPixels = 0
+    m.nowPixel = 0
     m.trackWidth = 1490
     m.autoFollowNow = true
     m.guideLoadedSeconds = 0
@@ -57,6 +58,8 @@ sub onGuideLoaded(event)
     if data.timeline <> invalid then m.timeline = data.timeline
     if data.roku_track_width <> invalid then m.trackWidth = data.roku_track_width
     m.guideLoadedSeconds = CreateObject("roDateTime").AsSeconds()
+    m.nowPixel = 0
+    m.windowOffsetPixels = 0
     m.top.FindNode("status").text = ""
     m.top.SetFocus(true)
     refreshGuideSelection()
@@ -323,7 +326,7 @@ sub onPlaybackReady(event)
     m.inPlayer = true
     closeGuideOverlay()
     showPlayerHud()
-    m.video.SetFocus(true)
+    m.top.SetFocus(true)
     m.video.control = "play"
 end sub
 
@@ -342,6 +345,9 @@ sub showGuideOverlay()
     if not m.inPlayer then return
     m.hudTimer.control = "stop"
     hidePlayerHud()
+    m.autoFollowNow = true
+    m.windowOffsetPixels = m.nowPixel
+    m.currentProgram = closestProgramIndex(m.currentChannel, m.nowPixel)
     m.guideVisible = true
     m.guideLayer.visible = true
     m.top.SetFocus(true)
@@ -351,7 +357,7 @@ end sub
 sub closeGuideOverlay()
     m.guideVisible = false
     m.guideLayer.visible = false
-    if m.inPlayer then m.video.SetFocus(true)
+    m.top.SetFocus(true)
 end sub
 
 sub cancelPendingTune()
@@ -407,14 +413,17 @@ sub updateClock()
     minutes = now.GetMinutes().ToStr()
     if Len(minutes) = 1 then minutes = "0" + minutes
     m.top.FindNode("clock").text = displayHour.ToStr() + ":" + minutes + suffix
-    if m.autoFollowNow and m.guideLoadedSeconds > 0 and m.rows.Count() > 0
+    if m.guideLoadedSeconds > 0 and m.rows.Count() > 0
         elapsed = now.AsSeconds() - m.guideLoadedSeconds
         shifted = Int(elapsed * m.trackWidth / 10800)
         if shifted > 0
-            m.windowOffsetPixels = m.windowOffsetPixels + shifted
+            m.nowPixel = m.nowPixel + shifted
             m.guideLoadedSeconds = now.AsSeconds()
-            renderTimeline()
-            renderGuideGrid()
+            if m.autoFollowNow
+                m.windowOffsetPixels = m.nowPixel
+                renderTimeline()
+                renderGuideGrid()
+            end if
         end if
     end if
 end sub
@@ -446,10 +455,10 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if key = "back"
             showGuideOverlay()
             return true
-        else if key = "fastforward" or key = "fwd" or key = "next" or key = "right"
+        else if key = "fastforward" or key = "fwd" or key = "next" or key = "skipforward" or key = "skipnext" or key = "tracknext" or key = "channelup" or key = "right" or key = "up"
             changeChannel(1)
             return true
-        else if key = "rewind" or key = "rev" or key = "replay" or key = "previous" or key = "left"
+        else if key = "rewind" or key = "rev" or key = "replay" or key = "previous" or key = "skipback" or key = "skipprevious" or key = "trackprevious" or key = "channeldown" or key = "left" or key = "down"
             changeChannel(-1)
             return true
         else if key = "options"

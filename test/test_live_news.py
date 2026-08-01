@@ -363,6 +363,10 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("closeGuideOverlay()", roku)
         self.assertIn('key = "fastforward"', roku)
         self.assertIn('key = "rewind"', roku)
+        self.assertIn('key = "channelup"', roku)
+        self.assertIn('key = "channeldown"', roku)
+        self.assertNotIn("m.video.SetFocus(true)", roku)
+        self.assertIn("m.currentProgram = closestProgramIndex(m.currentChannel, m.nowPixel)", roku)
         self.assertIn('m.guideLayer.visible = true', roku)
         self.assertIn('m.guideLayer.visible = false', roku)
 
