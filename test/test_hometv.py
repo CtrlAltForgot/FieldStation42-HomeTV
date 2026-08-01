@@ -191,6 +191,24 @@ class ResolverTests(unittest.TestCase):
             "El Camino: a Breaking Bad Movie (2019)",
         )
 
+    def test_futurama_movie_removes_order_prefix_and_restores_punctuation(self):
+        display = _movie_display(
+            "/media/Movies/Movie 3 Futurama Benders Game (2008).mkv"
+        )
+        self.assertEqual(
+            display["display_title"],
+            "Futurama: Bender's Game (2008)",
+        )
+
+    def test_super_mario_movie_restores_abbreviation_period(self):
+        display = _movie_display(
+            "/media/Movies/The Super Mario Bros Movie (2023).mkv"
+        )
+        self.assertEqual(
+            display["display_title"],
+            "The Super Mario Bros. Movie (2023)",
+        )
+
     def test_clean_program_number_is_not_treated_as_episode_number(self):
         display = program_display(
             "/media/channel-42.mp4", "Channel 42 Live Fixture"

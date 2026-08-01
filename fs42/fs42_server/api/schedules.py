@@ -48,6 +48,17 @@ TITLE_ALIASES = {
     "under the dome": "Under the Dome",
     "king of the hill": "King of the Hill",
 }
+MOVIE_TITLE_ALIASES = {
+    "futurama benders big score": "Futurama: Bender's Big Score",
+    "futurama the beast with a billion backs": (
+        "Futurama: The Beast with a Billion Backs"
+    ),
+    "futurama benders game": "Futurama: Bender's Game",
+    "futurama into the wild green yonder": (
+        "Futurama: Into the Wild Green Yonder"
+    ),
+    "the super mario bros movie": "The Super Mario Bros. Movie",
+}
 AUXILIARY_TITLES = {
     "behind the scenes",
     "deleted and extended scenes",
@@ -119,7 +130,13 @@ def _movie_display(path: str) -> dict:
             if not title:
                 continue
             normalized_title = _natural_title_case(_plain_title(title))
+            normalized_title = re.sub(
+                r"(?i)^(?:movie|film)\s+\d+\s+", "", normalized_title
+            )
             canonical_title = None
+            canonical_title = MOVIE_TITLE_ALIASES.get(
+                normalized_title.casefold()
+            )
             if normalized_title.casefold() == "el camino a breaking bad movie":
                 canonical_title = "El Camino: a Breaking Bad Movie"
             star_wars = re.match(
