@@ -352,6 +352,20 @@ class LiveNewsStaticContractTests(unittest.TestCase):
             roku.count('FindNode("status").text = ""'), 3
         )
 
+    def test_roku_guide_overlays_video_and_hud_auto_hides_in_blue(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
+        self.assertLess(scene.index('id="video"'), scene.index('id="guideLayer"'))
+        self.assertIn('color="#07111DCC"', scene)
+        self.assertIn('color="#07111DE8"', scene)
+        self.assertIn("m.hudTimer.duration = 6", roku)
+        self.assertIn("showGuideOverlay()", roku)
+        self.assertIn("closeGuideOverlay()", roku)
+        self.assertIn('key = "fastforward"', roku)
+        self.assertIn('key = "rewind"', roku)
+        self.assertIn('m.guideLayer.visible = true', roku)
+        self.assertIn('m.guideLayer.visible = false', roku)
+
     def test_tv_client_packages_have_required_manifests(self):
         manifest = open("clients/roku/manifest", encoding="utf-8").read()
         appinfo = json.load(open("clients/webos/appinfo.json", encoding="utf-8"))

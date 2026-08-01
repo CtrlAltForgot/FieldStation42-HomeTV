@@ -3,6 +3,7 @@ sub init()
     registry = CreateObject("roRegistrySection", "myHomeTV")
     if registry.Exists("server") then m.server = registry.Read("server")
     m.video = m.top.FindNode("video")
+    m.guideLayer = m.top.FindNode("guideLayer")
     m.video.ObserveField("state", "onVideoState")
     m.rows = []
     m.currentChannel = 0
@@ -15,10 +16,15 @@ sub init()
     m.sessionId = ""
     m.inPlayer = false
     m.isTuning = false
+    m.guideVisible = true
     m.prewarmTimer = CreateObject("roSGNode", "Timer")
     m.prewarmTimer.duration = 0.35
     m.prewarmTimer.repeat = false
     m.prewarmTimer.ObserveField("fire", "prewarmFocusedChannel")
+    m.hudTimer = CreateObject("roSGNode", "Timer")
+    m.hudTimer.duration = 6
+    m.hudTimer.repeat = false
+    m.hudTimer.ObserveField("fire", "hidePlayerHud")
     loadGuide()
     m.clockTimer = CreateObject("roSGNode", "Timer")
     m.clockTimer.duration = 1
@@ -314,10 +320,38 @@ sub onPlaybackReady(event)
     m.video.content = content
     m.top.FindNode("status").text = ""
     m.video.visible = true
-    m.top.FindNode("playerHud").visible = true
     m.inPlayer = true
+    closeGuideOverlay()
+    showPlayerHud()
     m.video.SetFocus(true)
     m.video.control = "play"
+end sub
+
+sub showPlayerHud()
+    if m.guideVisible then return
+    m.top.FindNode("playerHud").visible = true
+    m.hudTimer.control = "stop"
+    m.hudTimer.control = "start"
+end sub
+
+sub hidePlayerHud()
+    m.top.FindNode("playerHud").visible = false
+end sub
+
+sub showGuideOverlay()
+    if not m.inPlayer then return
+    m.hudTimer.control = "stop"
+    hidePlayerHud()
+    m.guideVisible = true
+    m.guideLayer.visible = true
+    m.top.SetFocus(true)
+    refreshGuideSelection()
+end sub
+
+sub closeGuideOverlay()
+    m.guideVisible = false
+    m.guideLayer.visible = false
+    if m.inPlayer then m.video.SetFocus(true)
 end sub
 
 sub cancelPendingTune()
@@ -408,16 +442,14 @@ end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
-    if m.inPlayer
+    if m.inPlayer and not m.guideVisible
         if key = "back"
-            stopPlayback()
-            m.top.SetFocus(true)
-            refreshGuideSelection()
+            showGuideOverlay()
             return true
-        else if key = "channelup" or key = "up"
+        else if key = "fastforward" or key = "fwd" or key = "next" or key = "right"
             changeChannel(1)
             return true
-        else if key = "channeldown" or key = "down"
+        else if key = "rewind" or key = "rev" or key = "replay" or key = "previous" or key = "left"
             changeChannel(-1)
             return true
         else if key = "options"
@@ -426,6 +458,10 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         else
             return true
         end if
+    end if
+    if m.inPlayer and m.guideVisible and key = "back"
+        closeGuideOverlay()
+        return true
     end if
     if m.rows.Count() = 0
         if key = "options" then showServerDialog()
