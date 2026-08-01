@@ -20,7 +20,7 @@ from fs42.metadata_io import MetadataIO
 from fs42.metadata_enrichment import artwork_root
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
-LOG = logging.getLogger("HomeTV.Client")
+LOG = logging.getLogger("myHomeTV.Client")
 PLAYLIST_STARTUP_ATTEMPTS = 200
 PLAYLIST_STARTUP_INTERVAL = 0.1
 PLAYLIST_READY_SEGMENTS = 1

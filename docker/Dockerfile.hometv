@@ -1,6 +1,6 @@
 FROM python:3.11-slim-bookworm
 
-LABEL org.opencontainers.image.title="FieldStation42 Home TV"
+LABEL org.opencontainers.image.title="myHomeTV"
 LABEL org.opencontainers.image.licenses="MPL-2.0"
 
 ENV PYTHONUNBUFFERED=1 \

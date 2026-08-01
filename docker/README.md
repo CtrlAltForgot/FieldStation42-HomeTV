@@ -1,4 +1,4 @@
-# Running FS42 as a Docker Container
+# Running myHomeTV as a Docker Container
 
 This uses a docker-compose file with mounts for catalog, runtime, and confs so the data persists across containers.
 
@@ -92,9 +92,9 @@ field_player() {
 ```
 
 This way, you can run `station_42` or `field_player` anywhere to launch them. (the location for FS42_LOCATION would likely need to change on your machine)
-# Headless Home TV / Unraid
+# Headless myHomeTV / Unraid
 
-The production Home TV deployment uses `Dockerfile.hometv` and
+The production myHomeTV deployment uses `Dockerfile.hometv` and
 `docker-compose.hometv.yml`. These intentionally contain no MPV, X11, local
 display, PulseAudio, or host audio mounts. The older Compose configuration
 below remains available for legacy local MPV playback.
@@ -133,7 +133,7 @@ application logs also persist in the configured logs directory.
 
 ## Isolated Unraid staging deployment
 
-The staging deployment is deliberately separate from an existing
+The deployment keeps its persistent data separate from an existing legacy
 FieldStation42 installation:
 
 - Repository: `/mnt/user/appdata/fieldstation42-hometv/app`
@@ -141,7 +141,7 @@ FieldStation42 installation:
 - Catalog: `/mnt/user/appdata/fieldstation42-hometv/catalog`
 - Runtime/database/HLS/logs: `/mnt/user/appdata/fieldstation42-hometv/runtime`
 - Media: `/mnt/user/Media`, mounted read-only
-- Container: `fieldstation42-hometv`
+- Container: `myhometv`
 - Host port: `4243` (container port `4242`)
 
 It uses normal bridge networking and has no X11, PulseAudio, or host-audio
@@ -179,8 +179,8 @@ modified.
 1. verifies it is running from the required repository;
 2. refuses to replace a container not labeled as this staging deployment;
 3. validates the Compose model and builds the staging image;
-4. validates all staged JSON against the FieldStation42 station schema;
-5. gracefully stops only a prior staging container, if present;
+4. validates all staged JSON against the compatible station schema;
+5. safely migrates the legacy `fieldstation42-hometv` container name to `myhometv`, or gracefully stops a prior myHomeTV container;
 6. backs up staging configuration, catalog, and runtime while excluding
    sockets and active SQLite journal files;
 7. assigns the staging directories to the image's unprivileged UID `4242`;

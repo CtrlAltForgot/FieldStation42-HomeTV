@@ -1,6 +1,8 @@
-# FieldStation42
+# myHomeTV
 
-FieldStation42 turns your Linux computer or Raspberry Pi into a broadcast and cable TV simulator. Instead of picking something to watch, you flip channels. Scheduled programming plays on its own timeline, with commercials, station bumps, and all the in-between stuff that made old-school TV feel alive. Learn more at [fieldstation42.com](https://fieldstation42.com).
+myHomeTV turns your media library into a polished, familiar cable-TV experience. Instead of picking individual files, you flip through personal channels with scheduled programming, commercials, station bumps, a living guide, artwork, metadata, and shared live playback.
+
+myHomeTV is built from the open-source [FieldStation42](https://github.com/shane-mason/FieldStation42) project and retains its Mozilla Public License attribution.
 
 ![A cable box next to a TV](docs/cable_cover_3.png?raw=true)
 ## What It Does
@@ -14,10 +16,10 @@ FieldStation42 turns your Linux computer or Raspberry Pi into a broadcast and ca
 - **On-screen display** — channel banners and now-playing info overlay on the screen
 - **Extensive REST API** — control playback, change channels, query status, and build your own tools and integrations against a full HTTP API
 - **Runs anywhere** — Raspberry Pi, any Linux machine, or Windows via WSL
-- **Home TV server mode** — run headlessly on Unraid/Docker and watch the
+- **myHomeTV server mode** — run headlessly on Unraid/Docker and watch the
   shared channel timeline from browsers at `/watch`
 
-## Headless Home TV
+## Headless myHomeTV
 
 This fork includes an HLS-based browser viewer while preserving the original
 local MPV player. The Unraid/server instance owns the media, catalog, schedule,
@@ -37,11 +39,11 @@ and FFmpeg processes; viewing devices only open a browser.
 
 The management console remains at `/`, and local installations can continue
 using `field_player.py` and MPV unchanged. See
-[Home TV architecture](docs/HOMETV_ARCHITECTURE.md),
+[myHomeTV architecture](docs/HOMETV_ARCHITECTURE.md),
 [Docker/Unraid setup](docker/README.md), and
 [Raspberry Pi kiosk setup](docs/RASPBERRY_PI_KIOSK.md).
 
-After upgrading an existing HomeTV staging deployment, use **Rebuild catalog
+After upgrading an existing myHomeTV deployment, use **Rebuild catalog
 and generate one week** (or rebuild, then explicitly reset and regenerate the
 schedule). This replaces legacy scene-chapter break positions, removes
 supplemental movie/TV files from future schedules, and applies canonical
@@ -96,5 +98,4 @@ If you're getting value from FieldStation42, consider supporting it on [Patreon]
 ## Contributing
 
 Bug reports, feature requests, and pull requests are welcome. Please open an issue before submitting large changes.
-
 

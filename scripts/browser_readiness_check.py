@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive a real Chromium browser through the HomeTV readiness flow."""
+"""Drive a real Chromium browser through the myHomeTV readiness flow."""
 
 from __future__ import annotations
 

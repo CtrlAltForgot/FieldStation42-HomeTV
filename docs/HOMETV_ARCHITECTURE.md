@@ -1,10 +1,10 @@
-# Home TV Server Architecture
+# myHomeTV Server Architecture
 
 ## Status and goals
 
-This document records the architecture of the headless Home TV mode. The
+This document records the architecture of the headless myHomeTV mode. The
 existing `field_player.py`/MPV player remains supported as a legacy local
-playback mode. Home TV adds a second consumer of the same station
+playback mode. myHomeTV adds a second consumer of the same station
 configuration, catalog, and liquid schedule: a FastAPI service that resolves
 the program airing at wall-clock time and exposes it as browser-compatible
 HLS.

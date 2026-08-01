@@ -49,7 +49,7 @@ async def _lifespan(app):
         app.state.hls_sessions.close()
 
 # Create FastAPI app
-fapi = FastAPI(title="FieldStation42 API", lifespan=_lifespan)
+fapi = FastAPI(title="myHomeTV API", lifespan=_lifespan)
 
 @fapi.get("/")
 async def root():

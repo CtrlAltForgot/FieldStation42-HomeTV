@@ -20,7 +20,7 @@ from fs42.catalog_api import CatalogAPI
 from fs42.liquid_api import LiquidAPI
 from fs42.station_manager import StationManager
 
-LOG = logging.getLogger("HomeTV")
+LOG = logging.getLogger("myHomeTV")
 ASSET_RE = re.compile(r"^(?:master\.m3u8|stream\d+\.ts)$")
 
 

@@ -759,7 +759,7 @@ function startTextCarousel() {
   if (!titleEl || !bodyEl) return;
 
   if (!messages.length) {
-    titleEl.textContent = 'FieldStation42';
+    titleEl.textContent = 'myHomeTV';
     bodyEl.textContent = '';
     return;
   }

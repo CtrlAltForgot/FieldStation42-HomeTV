@@ -17,9 +17,9 @@ class StationBump {
         this.textLoopTimers = [];
 
         this.config = {
-            title: 'FieldStation42',
+            title: 'myHomeTV',
             subtitle: 'Big Time Watching Is Here!',
-            details: ['Transmitting 24/7', 'On FieldStation42', 'It\'s up to you!'],
+            details: ['Transmitting 24/7', 'On myHomeTV', 'Your TV, your way'],
             backgroundImage: null,
             backgroundVideo: null,
             backgroundVideoLoopCount: 1,
@@ -556,7 +556,7 @@ class StationBump {
         const params = new URLSearchParams(window.location.search);
 
         const config = {
-            title: params.get('title') || 'FieldStation42',
+            title: params.get('title') || 'myHomeTV',
             subtitle: params.get('subtitle') || 'Its Up to you!',
             details: [
                 params.get('detail1') || 'Big time watching is here!',

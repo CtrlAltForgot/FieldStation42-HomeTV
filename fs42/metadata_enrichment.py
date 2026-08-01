@@ -100,7 +100,7 @@ class MetadataEnricher:
         unique_paths = list(dict.fromkeys(os.path.realpath(path) for path in paths))
         stats = {"total": len(unique_paths), "updated": 0, "skipped": 0, "unmatched": 0}
         if not self.helper.is_configured():
-            report("TMDB is not configured. Set TMDB_API_KEY and restart HomeTV.")
+            report("TMDB is not configured. Set TMDB_API_KEY and restart myHomeTV.")
             stats["unconfigured"] = True
             return stats
         self.art_dir.mkdir(parents=True, exist_ok=True)

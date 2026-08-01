@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class UnraidDeploymentTests(unittest.TestCase):
     def test_compose_is_isolated_and_headless(self):
         compose = (ROOT / "docker/docker-compose.unraid-staging.yml").read_text()
-        self.assertIn('container_name: fieldstation42-hometv', compose)
+        self.assertIn('container_name: myhometv', compose)
+        self.assertIn('image: myhometv:staging', compose)
         self.assertIn('"4243:4242"', compose)
         self.assertIn('"/mnt/user/Media:/media:ro"', compose)
         self.assertIn(
@@ -24,6 +25,25 @@ class UnraidDeploymentTests(unittest.TestCase):
         self.assertNotIn("network_mode: host", compose)
         self.assertNotIn("X11", compose)
         self.assertNotIn("PULSE", compose.upper())
+
+    def test_rebrand_keeps_legacy_container_migration_safe(self):
+        deploy = (ROOT / "deploy-unraid.sh").read_text()
+        self.assertIn('readonly CONTAINER="myhometv"', deploy)
+        self.assertIn('readonly LEGACY_CONTAINER="fieldstation42-hometv"', deploy)
+        self.assertIn('docker rename "$LEGACY_CONTAINER" "$LEGACY_BACKUP"', deploy)
+        self.assertIn('docker rm "$LEGACY_BACKUP"', deploy)
+
+    def test_primary_web_surfaces_use_myhometv_brand(self):
+        expected = {
+            "fs42/fs42_server/static/index.html": "<title>myHomeTV</title>",
+            "fs42/fs42_server/static/guide_frame.html": "myHomeTV Guide",
+            "fs42/fs42_server/static/watch.html": "myHomeTV — Watch",
+            "fs42/fs42_server/static/remote.html": "remote-brand\">myHomeTV",
+            "fs42/fs42_server/static/common.js": ">myHomeTV</a>",
+        }
+        for relative, brand in expected.items():
+            with self.subTest(relative=relative):
+                self.assertIn(brand, (ROOT / relative).read_text())
 
     def test_migration_copies_only_toon_mix_json(self):
         with tempfile.TemporaryDirectory() as temp:

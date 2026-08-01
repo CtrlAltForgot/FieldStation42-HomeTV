@@ -316,7 +316,7 @@
       localStorage.setItem("fs42-channel", String(channel));
     } catch (error) {
       if (error.name === "AbortError") return;
-      console.error("HomeTV startup failed", error);
+      console.error("myHomeTV startup failed", error);
       message.textContent = error.message;
       isTuning = false;
       recover(true);

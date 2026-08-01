@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create isolated two-channel HomeTV state and generated test media."""
+"""Create isolated two-channel myHomeTV state and generated test media."""
 
 from __future__ import annotations
 

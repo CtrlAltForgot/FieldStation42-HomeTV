@@ -1,10 +1,12 @@
+name: myhometv
+
 services:
-  fieldstation42:
+  myhometv:
     build:
       context: ..
       dockerfile: docker/Dockerfile.hometv
-    image: fieldstation42-hometv:local
-    container_name: fieldstation42-hometv
+    image: myhometv:local
+    container_name: myhometv
     restart: unless-stopped
     init: true
     ports:

@@ -166,7 +166,7 @@ class DiagnosticsSlideshow {
         
         const pageInfo = document.createElement('div');
         pageInfo.className = 'page-info';
-        pageInfo.textContent = 'FieldStation42';
+        pageInfo.textContent = 'myHomeTV';
         
         const timestamp = document.createElement('div');
         timestamp.className = 'timestamp';

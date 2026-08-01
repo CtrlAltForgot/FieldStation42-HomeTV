@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About - FieldStation42</title>
+    <title>About — myHomeTV</title>
     <link rel="stylesheet" href="https://unpkg.com/purecss@3.0.0/build/pure-min.css">
     <link rel="stylesheet" href="https://unpkg.com/purecss@3.0.0/build/grids-responsive-min.css">
     <link rel="stylesheet" id="theme-css" href="/static/themes/default.css">
@@ -73,7 +73,7 @@
                     <h2>Application Settings</h2>
                     <div class="settings-section">
                         <h3>Theme Selection</h3>
-                        <p>Choose your preferred visual theme for FieldStation42:</p>
+                        <p>Choose your preferred visual theme for myHomeTV:</p>
                         <div class="theme-selector">
                             <select id="theme-select" class="pure-input-1-2" onchange="setTheme(this.value)">
                                 <option>Loading themes...</option>
@@ -93,8 +93,8 @@
                 </div>
 
                 <div class="pure-u-1" style="margin-top: 2em;">
-                    <h2>About FieldStation42</h2>
-                    <p>FieldStation42 is a modern system that simulates retro TV.</p>
+                    <h2>About myHomeTV</h2>
+                    <p>myHomeTV turns your own media library into a familiar, scheduled television experience.</p>
 
                     <h3>Features</h3>
                     <ul>
@@ -116,15 +116,15 @@
                                 <td>Mozilla Public License</td>
                             </tr>
                             <tr>
-                                <td><strong>Author</strong></td>
-                                <td>Shane Mason</td>
+                                <td><strong>Foundation</strong></td>
+                                <td>Built from the open-source FieldStation42 project</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             `;
 
-            document.body.innerHTML = await window.fs42Common.createPageLayout('About FieldStation42', content);
+            document.body.innerHTML = await window.fs42Common.createPageLayout('About myHomeTV', content);
 
             // Load themes after the HTML is inserted
             loadThemes();

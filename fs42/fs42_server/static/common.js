@@ -44,7 +44,7 @@ async function createMainMenu() {
 
     return `
         <div class="pure-menu pure-menu-horizontal custom-menu" id="mainMenu">
-            <a href="#" class="pure-menu-heading">FieldStation42</a>
+            <a href="/" class="pure-menu-heading" aria-label="myHomeTV home">myHomeTV</a>
             <span class="menu-toggle" onclick="window.fs42Common.toggleMenu()">&#9776;</span>
             <ul class="pure-menu-list">
                 <li class="pure-menu-item"><a href="/" class="pure-menu-link">Home</a></li>

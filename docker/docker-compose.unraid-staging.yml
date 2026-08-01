@@ -1,12 +1,12 @@
-name: fieldstation42-hometv-staging
+name: myhometv
 
 services:
-  fieldstation42-hometv:
+  myhometv:
     build:
       context: "${FS42_APP_PATH:-/mnt/user/appdata/fieldstation42-hometv/app}"
       dockerfile: docker/Dockerfile.hometv
-    image: fieldstation42-hometv:staging
-    container_name: fieldstation42-hometv
+    image: myhometv:staging
+    container_name: myhometv
     restart: unless-stopped
     init: true
     runtime: nvidia
@@ -43,7 +43,7 @@ services:
       retries: 3
       start_period: 20s
     labels:
-      com.fieldstation42.deployment: "unraid-staging"
-      com.fieldstation42.repository: "/mnt/user/appdata/fieldstation42-hometv/app"
+      com.myhometv.deployment: "unraid-staging"
+      com.myhometv.repository: "/mnt/user/appdata/fieldstation42-hometv/app"
     security_opt:
       - no-new-privileges:true
