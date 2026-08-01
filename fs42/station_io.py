@@ -28,14 +28,16 @@ class StationIO:
         "break_duration": 120,
         "hidden": False,
         "media_filter": "video",
+        "commercial_free_duration_seconds": 3600,
+        "max_commercial_padding_seconds": 240,
     }
 
     # Fields that reference files that should exist
     FILE_CHECKS = ["content_dir", "sign_off_video", "off_air_video", "standby_image", "be_right_back_media"]
 
     # Network types that don't have catalogs or schedules
-    NO_CATALOG = {"guide", "streaming", "web"}
-    NO_SCHEDULE = {"guide", "streaming", "web"}
+    NO_CATALOG = {"guide", "streaming", "web", "live_news"}
+    NO_SCHEDULE = {"guide", "streaming", "web", "live_news"}
 
     def __init__(self):
         self._l = logging.getLogger("STATIONIO")

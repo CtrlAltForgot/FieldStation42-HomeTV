@@ -91,7 +91,10 @@ class ScheduleResolver:
     def channels(self) -> list[dict]:
         channels = []
         for station in self.manager.stations:
-            if station.get("hidden") or not station.get("_has_schedule", False):
+            if station.get("hidden") or not (
+                station.get("_has_schedule", False)
+                or station.get("network_type") == "live_news"
+            ):
                 continue
             channels.append(
                 {
@@ -108,7 +111,10 @@ class ScheduleResolver:
                 str(station.get("channel_number")) == value
                 or station.get("network_name") == value
             ):
-                if station.get("_has_schedule", False) and not station.get("hidden"):
+                if (
+                    station.get("_has_schedule", False)
+                    or station.get("network_type") == "live_news"
+                ) and not station.get("hidden"):
                     return station
                 break
         raise ChannelNotFound(f"Unknown scheduled channel: {channel}")
@@ -525,7 +531,7 @@ class HLSSessionManager:
             os.environ.get("FS42_FFMPEG", "ffmpeg"),
             "-hide_banner",
             "-loglevel",
-            "warning",
+            "fatal",
             "-nostdin",
             "-fflags",
             "+genpts+discardcorrupt",

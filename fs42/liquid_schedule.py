@@ -57,6 +57,21 @@ class LiquidSchedule:
         metadata = MetadataIO.read(path)
         return MediaProcessor.is_movie(path, metadata)
 
+    def _candidate_is_long_form(self, candidate):
+        """Movies and hour-plus features never receive commercial reels."""
+        threshold = float(self.conf.get("commercial_free_duration_seconds", 3600))
+        if threshold < 0:
+            raise ValueError("commercial_free_duration_seconds must not be negative")
+        return self._candidate_is_movie(candidate) or candidate.duration >= threshold
+
+    def _program_target_duration(self, duration, increment=None):
+        """Cap total filler so a short item cannot create an oversized ad pod."""
+        rounded = self._calc_target_duration(duration, increment)
+        cap = float(self.conf.get("max_commercial_padding_seconds", 240))
+        if not 0 <= cap <= 900:
+            raise ValueError("max_commercial_padding_seconds must be between 0 and 900")
+        return min(rounded, duration + cap)
+
     def _movie_target_duration(self, duration, increment=None):
         """Allow only brief post-credit padding instead of a full grid gap."""
         rounded = self._calc_target_duration(duration, increment)
@@ -173,11 +188,11 @@ class LiquidSchedule:
 
             break_info, break_strategy, increment = self._break_info(slot_config, tag_str, candidate.path)
 
-            is_movie = self._candidate_is_movie(candidate)
+            commercial_free = self._candidate_is_long_form(candidate)
             target_duration = (
-                self._movie_target_duration(candidate.duration, increment)
-                if is_movie
-                else self._calc_target_duration(candidate.duration, increment)
+                candidate.duration
+                if commercial_free
+                else self._program_target_duration(candidate.duration, increment)
             )
             next_mark = current_mark + datetime.timedelta(seconds=target_duration)
             new_block = LiquidBlock(
@@ -185,7 +200,7 @@ class LiquidSchedule:
                 current_mark,
                 next_mark,
                 candidate.title,
-                "end" if is_movie else break_strategy,
+                "end" if commercial_free else break_strategy,
                 break_info,
             )
             # add sequence information

@@ -18,6 +18,8 @@ async def get_summary():
             "network_long_name": station.get("network_long_name", ""),
             "channel_number": station["channel_number"],
             "_has_schedule": station["_has_schedule"],
+            "network_type": station.get("network_type", "standard"),
+            "is_live_source": station.get("network_type") == "live_news",
             "hidden": station.get("hidden", False),
             "catalog_summary": CatalogAPI.get_summary(station),
             "schedule_summary": sched_summary,

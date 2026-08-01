@@ -164,6 +164,11 @@ weekly premieres, reruns, persistent history, channel promos, and seasonal
 bumper folders are documented in
 [the myHomeTV scheduler guide](../docs/HOMETV_SCHEDULER.md).
 
+The main page also includes a **Free Live News** installer for official,
+zero-subscription streams. It needs no API key and avoids occupied channel
+numbers automatically. See [Free live news](../docs/HOMETV_LIVE_NEWS.md) for
+source, playback, availability, and privacy details.
+
 From the staging repository on Unraid:
 
 ```bash

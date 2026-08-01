@@ -18,6 +18,37 @@ from fs42.liquid_schedule import LiquidSchedule
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
+    def test_hour_long_content_is_commercial_free_even_outside_movie_folder(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {"schedule_increment": 30}
+        feature = SimpleNamespace(
+            path="/media/TV/Special/Event.mkv", realpath="/media/TV/Special/Event.mkv",
+            duration=3600,
+        )
+        with patch("fs42.liquid_schedule.MetadataIO.read", return_value=None):
+            self.assertTrue(schedule._candidate_is_long_form(feature))
+
+    def test_fifty_minute_episode_remains_eligible_but_padding_is_capped(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {"schedule_increment": 30}
+        episode = SimpleNamespace(
+            path="/media/TV/Show/S01E01.mkv", realpath="/media/TV/Show/S01E01.mkv",
+            duration=3000,
+        )
+        with patch("fs42.liquid_schedule.MetadataIO.read", return_value=None):
+            self.assertFalse(schedule._candidate_is_long_form(episode))
+        self.assertEqual(schedule._program_target_duration(episode.duration), 3240)
+
+    def test_movie_uses_exact_runtime_in_new_schedule_path(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {"schedule_increment": 30}
+        movie = SimpleNamespace(
+            path="/media/Movies/Feature.mkv", realpath="/media/Movies/Feature.mkv",
+            duration=7500,
+        )
+        with patch("fs42.liquid_schedule.MetadataIO.read", return_value=None):
+            self.assertTrue(schedule._candidate_is_long_form(movie))
+
     def test_movie_library_path_is_identified_without_metadata(self):
         schedule = LiquidSchedule.__new__(LiquidSchedule)
         schedule.conf = {"schedule_increment": 30}

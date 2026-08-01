@@ -1,15 +1,14 @@
 (() => {
   "use strict";
 
-  const WINDOW_MINUTES = 240;
+  const WINDOW_MINUTES = 720;
   const PIXELS_PER_MINUTE = 11;
   const PREVIEW_DELAY = 400;
-  const REFRESH_INTERVAL = 60_000;
   const state = {
     stations: [], rows: [], rowIndex: 0, blockIndex: 0,
     start: null, end: null, selected: null,
     previewTimer: null, previewSession: null, hls: null,
-    requestToken: 0,
+    requestToken: 0, autoFollowNow: true,
     previewEnabled: localStorage.getItem("fs42-guide-preview") !== "false",
     previewActive: !["watch", "compact"].includes(
       new URLSearchParams(window.location.search).get("embedded") ||
@@ -22,6 +21,7 @@
   const scroll = $("#guide-scroll");
   const video = $("#preview-video");
   const art = $("#preview-art");
+  const liveFrame = $("#preview-live-news");
   if (video) video.disablePictureInPicture = true;
 
   function api(url, options) {
@@ -70,7 +70,7 @@
     resetWindow();
     const all = await window.fs42Common.fetchStationSummary();
     state.stations = all
-      .filter(item => !item.hidden && item._has_schedule)
+      .filter(item => !item.hidden && (item._has_schedule || item.is_live_source))
       .sort((a, b) => String(a.channel_number).localeCompare(String(b.channel_number), undefined, {numeric: true}));
     const extendedStart = new Date(state.start.getTime() - 3 * 60 * 60_000);
     state.rows = [];
@@ -306,6 +306,15 @@
         return;
       }
       state.previewSession = result.session_id;
+      if (result.playback_kind === "embed") {
+        liveFrame.src = result.embed_url;
+        liveFrame.hidden = false;
+        video.hidden = true;
+        art.hidden = true;
+        $("#preview-fallback").hidden = true;
+        $("#preview-loading").hidden = true;
+        return;
+      }
       const showVideo = () => {
         if (token !== state.requestToken) return;
         video.hidden = false;
@@ -340,6 +349,8 @@
     video.pause();
     video.hidden = true;
     video.removeAttribute("src");
+    liveFrame.hidden = true;
+    liveFrame.removeAttribute("src");
     if (state.previewSession) {
       const id = state.previewSession;
       state.previewSession = null;
@@ -348,6 +359,7 @@
   }
 
   function moveHorizontal(delta) {
+    state.autoFollowNow = false;
     const row = state.rows[state.rowIndex];
     select(state.rowIndex, Math.max(0, Math.min(row.visibleBlocks.length - 1, state.blockIndex + delta)), true);
   }
@@ -382,7 +394,14 @@
 
   function returnToNow() {
     stopPreview();
-    load().catch(showError);
+    state.autoFollowNow = true;
+    const now = new Date();
+    const currentRow = state.rows[state.rowIndex];
+    const currentIndex = currentRow?.visibleBlocks.findIndex(
+      block => new Date(block.start_time) <= now && new Date(block.end_time) > now
+    );
+    if (currentIndex >= 0) select(state.rowIndex, currentIndex, false);
+    updateClockAndMarker();
   }
 
   function jumpToChannel(digit) {
@@ -414,10 +433,19 @@
     const now = new Date();
     const clock = $("#guide-clock");
     if (clock) clock.textContent = formatTime(now);
-    const minutes = (now - state.start) / 60_000;
-    const marker = $("#time-marker");
-    marker.hidden = minutes < 0 || minutes > WINDOW_MINUTES;
-    marker.style.left = `calc(var(--channel-width) + ${minutes * PIXELS_PER_MINUTE}px)`;
+    // Let the grid drift left by a few pixels each second so the channel
+    // boundary itself is the current-time indicator. No disruptive reload or
+    // red line is needed. Once the viewer browses horizontally, leave their
+    // chosen position alone until Return to now is pressed.
+    if (state.autoFollowNow) {
+      scroll.scrollLeft = Math.max(0, (now - state.start) / 60_000 * PIXELS_PER_MINUTE);
+    }
+    document.querySelectorAll(".program[data-row]").forEach(element => {
+      const block = state.rows[Number(element.dataset.row)]?.visibleBlocks[Number(element.dataset.block)];
+      if (block) element.classList.toggle(
+        "current", new Date(block.start_time) <= now && new Date(block.end_time) > now
+      );
+    });
     updateProgress();
   }
 
@@ -447,12 +475,6 @@
   });
   window.addEventListener("pagehide", stopPreview);
   setInterval(updateClockAndMarker, 1000);
-  setInterval(() => {
-    const expected = new Date();
-    // Keep the ordinary guide pinned to "now" instead of gradually exposing
-    // the elapsed portion of the previous half-hour. Backward browsing still
-    // remains available through the explicit navigation action.
-    if (expected - state.start >= 60_000) returnToNow();
-  }, REFRESH_INTERVAL);
+  scroll.addEventListener("wheel", () => { state.autoFollowNow = false; }, {passive:true});
   load().catch(showError);
 })();

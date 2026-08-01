@@ -6,6 +6,7 @@ from fs42.station_manager import StationManager
 from fs42.liquid_api import LiquidAPI
 from fs42.metadata_io import MetadataIO
 from fs42.title_parser import TitleParser
+from fs42.live_news import schedule_blocks as live_schedule_blocks
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 EPISODE_RE = re.compile(
@@ -451,6 +452,8 @@ async def search_all_schedules(query: str = None):
 @router.get("/search/{network_name}")
 async def search_schedule(network_name: str, query: str = None):
     conf = StationManager().station_by_name(network_name)
+    if conf is None:
+        return {"error": f"Unknown station {network_name}", "schedule_blocks": []}
     if query:
         schedule_blocks = LiquidAPI.search_blocks(conf, query)
     else:
@@ -476,7 +479,12 @@ async def get_schedule(
         except ValueError:
             return {"error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS) for start and end."}
 
-    schedule_blocks = LiquidAPI.get_blocks(conf, sdt, edt)
+    if conf.get("network_type") == "live_news":
+        sdt = sdt or datetime.now()
+        edt = edt or (sdt + __import__("datetime").timedelta(hours=24))
+        schedule_blocks = live_schedule_blocks(conf, sdt, edt)
+    else:
+        schedule_blocks = LiquidAPI.get_blocks(conf, sdt, edt)
     if include_meta or include_display:
         _attach_meta(schedule_blocks, read_meta=include_meta)
     return {"network_name": network_name, "schedule_blocks": schedule_blocks}

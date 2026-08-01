@@ -1,0 +1,16 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{box-sizing:border-box}html,body,#player,#standby{width:100%;height:100%;margin:0;background:#05080c;overflow:hidden}#standby{position:absolute;inset:0;display:grid;place-content:center;text-align:center;color:#dce8f2;font:600 22px system-ui;background:radial-gradient(circle at 50% 35%,#17354d,#05080c 70%)}#standby small{display:block;margin-top:12px;color:#7ee8ff;font-size:14px;letter-spacing:.12em;text-transform:uppercase}.ready #standby{display:none}</style></head>
+<body><div id="player"></div><div id="standby">Connecting to the official live stream…<small>myHomeTV live news</small></div>
+<script>
+const id=new URLSearchParams(location.search).get('channel')||'';
+const allowed=/^UC[A-Za-z0-9_-]{20,30}$/.test(id);
+function tell(type,detail=''){parent.postMessage({type,detail},location.origin)}
+if(allowed){
+  const frame=document.createElement('iframe');frame.id='official';frame.allow='autoplay; encrypted-media; fullscreen';frame.referrerPolicy='strict-origin-when-cross-origin';frame.style='border:0;width:100%;height:100%';
+  frame.src=`https://www.youtube-nocookie.com/embed/live_stream?channel=${encodeURIComponent(id)}&autoplay=1&controls=1&playsinline=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`;
+  frame.onload=()=>{document.body.classList.add('ready');tell('myhometv-live-playing')};
+  document.querySelector('#player').append(frame);
+  addEventListener('message',e=>{if(e.origin!==location.origin)return;const a=e.data||{};let func,args=[];if(a.type==='volume'){func=a.muted?'mute':'unMute';frame.contentWindow.postMessage(JSON.stringify({event:'command',func,args}),'https://www.youtube-nocookie.com');frame.contentWindow.postMessage(JSON.stringify({event:'command',func:'setVolume',args:[Math.round(a.value*100)]}),'https://www.youtube-nocookie.com')}if(a.type==='play')func='playVideo';if(a.type==='pause')func='pauseVideo';if(func)frame.contentWindow.postMessage(JSON.stringify({event:'command',func,args}),'https://www.youtube-nocookie.com')});
+  setInterval(()=>{frame.src=frame.src},6*60*60*1000);
+}else{document.querySelector('#standby').firstChild.textContent='This live source is not configured safely.';tell('myhometv-live-error','invalid channel')}
+</script></body></html>

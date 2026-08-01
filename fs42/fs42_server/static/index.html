@@ -56,6 +56,13 @@
                     </div>
                     <pre id="quick-log" style="min-height:4em;max-height:18em;overflow:auto;padding:1em;background:#111;color:#ddd;white-space:pre-wrap;">Ready.</pre>
                 </div>
+                <div id="live-news-card" class="pure-u-1" style="margin-top:1.5em;padding:1.2em;border:1px solid #344555;border-radius:8px;background:#101822;">
+                    <h2 style="margin:.1em 0 .35em;">Free Live News</h2>
+                    <p style="color:#a9b5c1;">Add official, publisher-operated live news streams. No subscription or paid API key is required.</p>
+                    <div id="live-news-sources" style="display:grid;gap:.45em;margin:.8em 0;">Loading available sources…</div>
+                    <button id="live-news-install" class="pure-button pure-button-primary">Add selected news channels</button>
+                    <span id="live-news-status" style="margin-left:.8em;color:#61cfff;"></span>
+                </div>
                 
                 <div id="ticker-control" class="pure-u-1" style="display:none; margin-top:1.5em; margin-bottom:1.5em;">
                     <h2 style="margin-bottom:1em; font-size:1.2em;">Display Message</h2>
@@ -187,6 +194,29 @@
             }
         }
         document.addEventListener('fs42-layout-ready', loadStationSummary);
+
+        async function loadLiveNews() {
+            const box = document.getElementById('live-news-sources');
+            if (!box) return;
+            try {
+                const result = await window.fs42Api.get('api/live-news/sources');
+                box.innerHTML = result.sources.map(source => `<label style="display:flex;align-items:center;gap:.55em;"><input type="checkbox" class="live-news-choice" value="${source.id}" ${source.installed_channel ? '' : 'checked'}> <strong>${source.name}</strong><span style="color:#8393a2;">${source.installed_channel ? `Installed on channel ${source.installed_channel}` : `Suggested channel ${source.channel}`}</span></label>`).join('');
+            } catch (error) { box.textContent = error.detail || error.message || 'Could not load sources.'; }
+        }
+        document.addEventListener('fs42-layout-ready', loadLiveNews);
+        document.addEventListener('click', async event => {
+            if (!event.target.closest('#live-news-install')) return;
+            const status = document.getElementById('live-news-status');
+            const source_ids = [...document.querySelectorAll('.live-news-choice:checked')].map(input => input.value);
+            if (!source_ids.length) { status.textContent = 'Choose at least one channel.'; return; }
+            event.target.disabled = true; status.textContent = 'Adding channels…';
+            try {
+                const result = await window.fs42Api.post('api/live-news/install', {source_ids});
+                status.textContent = `Ready: ${result.installed.map(item => `${item.name} (${item.channel})`).join(', ')}`;
+                await Promise.all([loadLiveNews(), loadStationSummary()]);
+            } catch (error) { status.textContent = error.detail || error.message || 'Installation failed.'; }
+            finally { event.target.disabled = false; }
+        });
 
         async function openProviderSettings() {
             const dialog = document.getElementById('provider-settings');

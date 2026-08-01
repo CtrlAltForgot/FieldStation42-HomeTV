@@ -1,6 +1,7 @@
 (() => {
   let video = document.querySelector("#video");
   let nextVideo = document.querySelector("#video-next");
+  const liveFrame = document.querySelector("#live-news");
   const channelSelect = document.querySelector("#channels");
   const message = document.querySelector("#message");
   const progress = document.querySelector("#progress span");
@@ -77,6 +78,8 @@
     clearTimeout(boundaryTimer);
     if (hls) { hls.destroy(); hls = null; }
     video.pause();
+    liveFrame.hidden = true;
+    liveFrame.removeAttribute("src");
     if (clearVideo) video.removeAttribute("src");
     if (sessionId) {
       const old = sessionId; sessionId = null;
@@ -195,7 +198,7 @@
   function schedulePrefetch() {
     clearTimeout(prefetchTimer);
     if (!nowInfo?.item_end || !channelSelect.value) return;
-    const delay = Math.max(0, Number(nowInfo.item_remaining) * 1000 - 12_000);
+    const delay = Math.max(0, Number(nowInfo.item_remaining) * 1000 - 20_000);
     const channel = String(channelSelect.value);
     const boundaryAt = nowInfo.item_end;
     prefetchTimer = setTimeout(async () => {
@@ -225,7 +228,11 @@
           preparedHls.attachMedia(nextVideo);
           await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error("Next item manifest was not ready")), 5000);
-            preparedHls.on(Hls.Events.MANIFEST_PARSED, () => { clearTimeout(timeout); resolve(); });
+            // A parsed manifest is not enough: wait until an actual media
+            // fragment is decoded into the hidden player. This makes the
+            // commercial-to-commercial swap immediate instead of exposing a
+            // browser buffering spinner at every boundary.
+            preparedHls.on(Hls.Events.FRAG_BUFFERED, () => { clearTimeout(timeout); resolve(); });
             preparedHls.on(Hls.Events.ERROR, (_event, data) => {
               if (data.fatal) { clearTimeout(timeout); reject(new Error(data.details || "Next item HLS failed")); }
             });
@@ -280,7 +287,12 @@
       nowInfo = result.now;
       renderNow();
       let playbackStarted;
-      if (prepared) {
+      if (result.playback_kind === "embed") {
+        liveFrame.src = result.embed_url;
+        liveFrame.hidden = false;
+        video.classList.remove("switching");
+        playbackStarted = true;
+      } else if (prepared) {
         hls = prepared.hls || null;
         const outgoing = video;
         outgoing.id = "video-next";
@@ -292,12 +304,12 @@
       } else {
         playbackStarted = await attach(result.playlist_url, signal, false);
       }
-      applySubtitleMode();
+      if (result.playback_kind !== "embed") applySubtitleMode();
       // Playback completion, not wall time, owns item transitions. This late
       // watchdog only recovers a browser that never emits `ended`; it can
       // never truncate buffered commercial frames.
       const boundaryDelay = Number(nowInfo.item_remaining) * 1000 + 30000;
-      boundaryTimer = setTimeout(
+      if (result.playback_kind !== "embed") boundaryTimer = setTimeout(
         () => {
           reportClientEvent(
             "item-end-watchdog",
@@ -312,7 +324,7 @@
           fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
         }
       }, 20000);
-      schedulePrefetch();
+      if (result.playback_kind !== "embed") schedulePrefetch();
       if (playbackStarted) message.textContent = "";
       localStorage.setItem("fs42-channel", String(channel));
     } catch (error) {
@@ -392,6 +404,7 @@
     userMuted = !userMuted;
     localStorage.setItem("fs42-muted", String(userMuted));
     video.muted = userMuted;
+    liveFrame.contentWindow?.postMessage({type:"volume", value:Number(document.querySelector("#volume").value), muted:userMuted}, location.origin);
     document.body.classList.toggle("muted", userMuted);
     document.querySelector("#mute").setAttribute(
       "aria-label",
@@ -401,6 +414,7 @@
   document.querySelector("#volume").oninput = event => {
     video.volume = event.target.value;
     localStorage.setItem("fs42-volume", String(video.volume));
+    liveFrame.contentWindow?.postMessage({type:"volume", value:Number(event.target.value), muted:userMuted}, location.origin);
   };
   document.querySelector("#fullscreen").onclick = () => document.querySelector("#viewer").requestFullscreen();
   function renderSubtitleMode() {
@@ -446,6 +460,14 @@
   document.querySelector("#guide-button").onclick = () => setGuideVisible(true);
   document.querySelector("#guide-close").onclick = () => setGuideVisible(false);
   window.addEventListener("message", event => {
+    if (event.origin === window.location.origin && event.data?.type === "myhometv-live-playing") {
+      recoveryAttempts = 0;
+      message.textContent = "";
+      liveFrame.contentWindow?.postMessage({type:"volume", value:Number(document.querySelector("#volume").value), muted:userMuted}, location.origin);
+    }
+    if (event.origin === window.location.origin && event.data?.type === "myhometv-live-error") {
+      message.textContent = "Official stream is temporarily unavailable — retrying…";
+    }
     if (event.origin === window.location.origin && event.data?.type === "fs42-guide-close") {
       setGuideVisible(false);
     }

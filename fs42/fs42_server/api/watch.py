@@ -4,6 +4,8 @@ import logging
 import mimetypes
 import re
 import time
+import hashlib
+import html
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -19,6 +21,7 @@ from fs42.hometv import (
 from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
 from fs42.metadata_enrichment import MetadataEnricher, artwork_root
+from fs42.live_news import artwork_svg, now_payload as live_now_payload, station_source
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
 LOG = logging.getLogger("myHomeTV.Client")
@@ -26,6 +29,19 @@ PLAYLIST_STARTUP_ATTEMPTS = 200
 PLAYLIST_STARTUP_INTERVAL = 0.1
 PLAYLIST_READY_SEGMENTS = 1
 PLAYLIST_READY_ATTEMPTS = 300
+
+
+def _series_placeholder(title: str) -> str:
+    """A stable series-specific card; never fall back to a channel number."""
+    safe = html.escape(title or "Program")
+    digest = hashlib.sha256(safe.casefold().encode()).hexdigest()
+    hue = int(digest[:4], 16) % 360
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+    <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="hsl({hue} 58% 38%)"/><stop offset="1" stop-color="#07111d"/></linearGradient></defs>
+    <rect width="1280" height="720" fill="url(#g)"/><circle cx="1040" cy="160" r="390" fill="#fff" opacity=".06"/>
+    <path d="M0 610 Q320 470 640 610 T1280 610 V720 H0Z" fill="#000" opacity=".2"/>
+    <text x="76" y="325" fill="#8feaff" font-family="sans-serif" font-size="28" font-weight="700" letter-spacing="6">SERIES</text>
+    <text x="76" y="420" fill="white" font-family="sans-serif" font-size="68" font-weight="700">{safe}</text></svg>'''
 
 
 class SessionRequest(BaseModel):
@@ -100,6 +116,9 @@ async def now(channel: str, request: Request):
     try:
         resolver = _manager(request).resolver
         timestamp = __import__("datetime").datetime.now()
+        station = resolver.station(channel)
+        if station.get("network_type") == "live_news":
+            return live_now_payload(station, timestamp)
         return _now_payload(resolver.now(channel, timestamp), timestamp)
     except WatchError as exc:
         raise _watch_error(exc)
@@ -110,6 +129,12 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
     """Serve trusted local artwork for one scheduled program without paths."""
     try:
         resolver = _manager(request).resolver
+        station = resolver.station(channel)
+        if station.get("network_type") == "live_news":
+            return Response(
+                artwork_svg(station), media_type="image/svg+xml",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
         airing = resolver.now(channel, at or dt.datetime.now())
         identity = airing.identity_path or airing.media_path
         approved = Path(
@@ -188,7 +213,16 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
                 media_type="image/jpeg",
                 headers={"Cache-Control": "private, max-age=86400"},
             )
-    raise HTTPException(404, "No local artwork is available for this program")
+    series_name = str(metadata.get("show_title", "")).strip()
+    if not series_name:
+        parent = approved.parent
+        if re.match(r"(?i)^(?:season[ ._-]*|s)\d+$", parent.name):
+            parent = parent.parent
+        series_name = parent.name
+    return Response(
+        _series_placeholder(series_name), media_type="image/svg+xml",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -197,6 +231,30 @@ async def create_session(body: SessionRequest, request: Request):
     started_at = time.monotonic()
     try:
         manager = _manager(request)
+        # Some integrations provide a minimal resolver and delegate all
+        # validation to manager.create(); station lookup is only required for
+        # the purpose-built live-news branch.
+        station = (
+            manager.resolver.station(body.channel)
+            if hasattr(manager.resolver, "station") else None
+        )
+        if station and station.get("network_type") == "live_news":
+            if body.profile not in {"auto", "copy"}:
+                raise ValueError("Unknown playback profile")
+            item = station_source(station)
+            if not item:
+                raise ValueError("This live-news source is not configured safely")
+            timestamp = dt.datetime.now()
+            return {
+                "session_id": None,
+                "playback_kind": "embed",
+                "embed_url": (
+                    "/static/live_news_player.html?channel="
+                    + item["youtube_channel_id"]
+                ),
+                "now": live_now_payload(station, timestamp),
+                "tune_metrics": {"playlist_ready_ms": 0, "shared_broadcast_age_ms": 0},
+            }
         boundary_at = body.boundary_at
         if boundary_at is not None:
             now = dt.datetime.now(tz=boundary_at.tzinfo)

@@ -24,7 +24,7 @@
         },
         "network_type": {
           "type": "string",
-          "enum": ["standard", "web", "guide", "loop", "streaming"],
+          "enum": ["standard", "web", "guide", "loop", "streaming", "live_news"],
           "description": "Type of network station"
         },
         "schedule_increment": {
@@ -54,6 +54,16 @@
           "maximum": 300,
           "default": 90,
           "description": "Maximum post-credits commercial padding for movies"
+        },
+        "commercial_free_duration_seconds": {
+          "type": "number", "minimum": 0,
+          "default": 3600,
+          "description": "Programs at least this many seconds long receive no ads (default one hour)"
+        },
+        "max_commercial_padding_seconds": {
+          "type": "number", "minimum": 0, "maximum": 900,
+          "default": 240,
+          "description": "Maximum total filler/ad time added to a program shorter than the commercial-free threshold"
         },
         "content_dir": {
           "type": "string",
@@ -520,6 +530,19 @@
               "description": "Date range in format 'Month Day - Month Day' (e.g., 'December 1 - January 2'). Configuration only loads if current date falls within this range.",
               "pattern": "^[A-Z][a-z]+ \\d+ - [A-Z][a-z]+ \\d+$"
             }
+          }
+        },
+        "live_source": {
+          "type": "object",
+          "description": "Validated official source configuration for a live-news station",
+          "required": ["source_id", "provider", "youtube_channel_id"],
+          "properties": {
+            "source_id": {"type": "string"},
+            "provider": {"const": "youtube"},
+            "youtube_channel_id": {"type": "string", "pattern": "^UC[A-Za-z0-9_-]{20,30}$"},
+            "official_url": {"type": "string", "format": "uri"},
+            "color": {"type": "string"},
+            "managed": {"type": "boolean"}
           }
         },
         "streams": {

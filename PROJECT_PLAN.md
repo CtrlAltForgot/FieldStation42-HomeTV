@@ -304,6 +304,37 @@ Verify in this order:
 - Preserve user data and provide rollback behavior for deployment migrations.
 - Run the full HomeTV and Unraid deployment test suites before every release.
 
+## Active live-news release (2026-08-01)
+
+- Add an idempotent one-click main-page installer for official, freely
+  available ABC News Live, CBS News 24/7, NBC News NOW, and LiveNOW from FOX
+  streams; require neither a subscription nor a paid API key.
+- Assign collision-safe channel numbers, validate curated source identities,
+  and construct embeds server-side. Never scrape, extract, or restream a
+  publisher's media URL.
+- Treat live news as first-class programming in station summaries, the guide,
+  artwork preview, channel navigation, and browser playback, with immediate
+  branded art and clear standby/error behavior when publishers are offline.
+- Preserve local scheduled/HLS behavior. Prebuffer a real fragment before
+  every boundary—especially back-to-back ads—and keep the outgoing picture
+  visible until the replacement is playable.
+- Ensure future episodic guide entries resolve one stable series-specific
+  cached image. If local/TMDB artwork cannot be produced, use a deterministic
+  series title card rather than the station's channel-number fallback.
+- Suppress harmless FFmpeg decoder chatter such as `Late SEI is not
+  implemented` during scanning/playback while retaining process failure and
+  recovery reporting.
+- Cover catalog/source validation, collision handling, repeat installation,
+  synthetic guide/now data, embed sessions, schema compatibility, static UI,
+  ad prebuffer behavior, and the full regression/container deployment suite.
+- Keep the guide open continuously: remove the red current-time marker and
+  micro-scroll the grid with wall time instead of rebuilding/closing it every
+  minute. Refresh data offscreen/in place only when future coverage runs low.
+- Treat every movie and every item lasting at least 60 minutes as completely
+  commercial-free. Keep 50-minute episodes eligible for restrained breaks,
+  but cap the total filler added to any shorter program so schedule rounding
+  cannot create an excessive ad pod.
+
 ## Follow-up reminder
 
 After the broadcast-realistic scheduler goal is complete, remind the user to
