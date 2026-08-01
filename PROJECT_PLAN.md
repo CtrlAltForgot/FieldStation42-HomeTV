@@ -86,10 +86,10 @@ temporary rollback name until the new container passes its health check.
 The rebrand release passed 69 automated tests. The preceding guide/metadata
 release passed 67 tests.
 
-## Next feature: friendly application settings
+## Completed feature: friendly application settings
 
-The next implementation should remove the need to create or edit
-`docker/.env` to configure TMDB.
+The management page now removes the need to create or edit `docker/.env` to
+configure TMDB or OpenSubtitles.
 
 ### User experience
 
@@ -128,6 +128,151 @@ The next implementation should remove the need to create or edit
   scanning works immediately without redeployment.
 - Add API, persistence, redaction, validation-failure, and UI-presence tests.
 
+## Implemented goal pending release: broadcast-realistic scheduler
+
+The scheduler should behave like a programmed television network rather than a
+random playlist. A viewer must be able to return at the same local time every
+week for the next episode of a show, while other slots use believable reruns
+drawn only from episodes that have already premiered on that channel.
+
+### Scheduling model
+
+- Keep the existing weekday/hour grid as the backward-compatible foundation.
+- Add opt-in `programming` settings to a series slot. A slot may be a
+  `premiere`, `rerun`, or `mixed` slot and has a stable `slot_id` so its state
+  survives harmless configuration edits.
+- A weekly premiere slot advances exactly once per configured broadcast week,
+  in canonical `(season, episode, part, path)` order. Multiple future weeks
+  generated at once reserve different consecutive episodes.
+- A rerun slot may select only an episode whose premiere time is in the past.
+  It should prefer the least recently aired eligible episode while respecting
+  minimum repeat spacing.
+- A mixed slot premieres when its cadence is due and otherwise behaves as a
+  rerun slot.
+- Default cadence is one new-to-channel episode per week. Supported cadence
+  should include a configurable number of premieres per week and optional
+  seasonal hiatus/date windows.
+- The guide marks scheduled programs as `NEW`, `RERUN`, or `SPECIAL` without
+  putting these words into the canonical media title.
+
+### Durable state and correctness
+
+- Introduce immutable schedule-airing identity and a durable broadcast-history
+  table keyed by station, slot, series, media identity, and scheduled time.
+- Separate `scheduled/reserved` from `aired`. Generating a month of future
+  schedules must not increment play counts or claim those episodes aired.
+- Reconcile history only when a scheduled program reaches its end time. This
+  works even with no active viewer because the network timeline itself aired.
+- Preserve reservations and episode order across restart, schedule extension,
+  catalog refresh, and incremental discovery of newly added episodes.
+- A destructive schedule reset releases only future reservations. Past aired
+  history remains unless the user explicitly chooses **Reset viewing history**.
+- Catalog rebuilds remap history through stable media identity (series, season,
+  episode and normalized path fingerprint), not volatile catalog row IDs.
+- Handle specials (`S0`), multipart episodes, missing episode numbers,
+  duplicate encodes, and gaps without silently moving the premiere cursor
+  backward.
+- Use the configured local timezone and test DST spring-forward and fall-back
+  weeks. Weekly slots remain anchored to wall-clock time.
+
+### Policies and fallbacks
+
+- `premiere_cadence`: default `weekly`.
+- `minimum_rerun_gap_days`: prevents the same episode repeating too soon.
+- `rerun_pool`: `aired_only` by default, with optional recent-season limits.
+- `catch_up_policy`: choose whether a missed/removed premiere waits for the
+  next weekly slot or advances while preserving an audit record.
+- `library_end_policy`: `reruns`, `restart_after_hiatus`, or `hold` rather than
+  silently wrapping to episode one as a new premiere.
+- If no rerun is eligible, use a configured slot fallback tag, then the station
+  fallback tag, and finally an explicit off-air/error block. Never premiere an
+  unaired episode in a rerun slot merely to fill time.
+
+### Configuration experience
+
+- Add a TV-friendly scheduler editor in station management with plain labels:
+  **New episode**, **Rerun**, **New when due, otherwise rerun**.
+- Let the user choose series/tag, weekday, local start time, cadence, rerun
+  spacing, hiatus dates, fallback, and end-of-library behavior.
+- Preview the next several weeks before saving, including episode, NEW/RERUN
+  status, conflicts, gaps, and fallbacks.
+- Provide history controls per series: view last aired/next premiere, correct
+  the next episode, mark an episode aired/unaired, and reset history only behind
+  an explicit confirmation.
+- Existing station JSON without `programming` fields continues using current
+  selection/sequence behavior unchanged.
+
+### Schedule-aware channel promos
+
+- Generate occasional short promo bumpers from the actual premiere calendar,
+  cached show artwork, and each channel's visual identity.
+- Supported copy includes **New episodes Thursdays at 6 Central**, **New season
+  Wednesday**, **Season premiere tonight**, and **Season finale**, chosen only
+  when supported by scheduled episode/season state.
+- Promos are channel-specific, expire automatically after their advertised
+  event, and regenerate when the schedule changes.
+- Use restrained broadcast-style motion (artwork pan/zoom, clean typography,
+  brief channel sting), broadcast-safe text margins, and readable TV sizing.
+- Place promos through the bumper/reel system with per-show and per-channel
+  frequency caps, a minimum spacing window, and a hard prohibition on
+  back-to-back promos. They should add texture, never become invasive.
+- Provide an enable switch, intensity (`rare`, `normal`, `frequent`), maximum
+  duration, and preview/regenerate controls in scheduler settings.
+
+### Guide, playback, and media support included in this goal
+
+- Anchor the normal guide viewport at the current minute on its far-left edge;
+  past programs appear only after an intentional backward browse. Keep the
+  current-time indicator at that boundary and preserve future guide coverage.
+- Precompute and cache one spoiler-safe series image for every episodic series.
+  Current programs may transition to a live preview, but future episodes always
+  use the generic series image and never reveal an episode-specific frame.
+  Prewarm visible artwork so the channel-number card is only an error fallback.
+- Prevent preview headings and metadata from clipping at the bottom at TV zoom
+  levels, keep controls near the lower edge, and disable picture-in-picture in
+  the guide preview.
+- Reduce tune time by keeping metadata/subtitle probing out of the first-frame
+  path and measuring manifest and first-segment latency.
+- Change subtitles without retuning the channel. Prefer embedded and sidecar
+  English subtitles, then optionally fetch a high-confidence match, cache it
+  with provenance, and never silently accept a low-confidence result.
+- Scaffold `catalog/channel_bumpers/<Channel>/` with `general`, `promos`,
+  `spring`, `summer`, `halloween`, `thanksgiving`, `christmas`, and
+  `new-years` folders. Only date-eligible seasonal folders join that channel's
+  bumper pool; existing shared bumper directories remain compatible.
+
+### Acceptance scenarios
+
+1. A show assigned Tuesday at 8:00 p.m. premieres S1E1 this week and S1E2 the
+   following Tuesday even if four weeks are generated in one operation.
+2. A Thursday rerun slot before the first Tuesday premiere uses its fallback;
+   after Tuesday it may air S1E1 but never S1E2 before S1E2's premiere.
+3. Restarting, extending, or rebuilding the catalog does not skip or duplicate
+   a weekly premiere.
+4. Adding S1E9 after S1E1-S1E8 were already known appends it without changing
+   past history or existing future reservations.
+5. Rebuilding a future schedule releases replaced reservations but retains all
+   history whose scheduled end is already in the past.
+6. The same rerun is not selected inside its configured repeat-gap window.
+7. Weekly wall-clock slots remain at the intended local time across both DST
+   transitions.
+8. Old station configurations and schedules continue to work without opting
+   into the new scheduler.
+
+### Release verification
+
+The implementation is covered by scheduler regression tests for consecutive
+multiweek reservation, aired-only reruns, repeat spacing, end-of-library
+policies, logical identity after rename, future-reset preservation, missing
+episode gaps, newly discovered episodes, specials, multipart episodes,
+duplicate encodes, cadence anchors, and both Central-time DST transitions.
+The broader HomeTV suite also covers guide labels/artwork, subtitle behavior,
+provider-setting redaction and validation, bumper season windows, promo
+placement, legacy schemas, and Unraid deployment contracts.
+
+Operator behavior and configuration are documented in
+`docs/HOMETV_SCHEDULER.md`.
+
 ## Immediate verification after the next deployment
 
 The 2026-08-01 screenshot still displayed `FIELDSTATION42` in the header and
@@ -158,3 +303,9 @@ Verify in this order:
   and automatically select full-dialogue English subtitles for foreign audio.
 - Preserve user data and provide rollback behavior for deployment migrations.
 - Run the full HomeTV and Unraid deployment test suites before every release.
+
+## Follow-up reminder
+
+After the broadcast-realistic scheduler goal is complete, remind the user to
+discuss Spotify-style music channels and the available playback/integration
+options.

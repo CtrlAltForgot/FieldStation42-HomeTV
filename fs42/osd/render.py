@@ -157,7 +157,7 @@ def create_window():
     glfw.window_hint(glfw.FOCUSED, glfw.TRUE)
     glfw.window_hint(glfw.AUTO_ICONIFY, glfw.FALSE)
     glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
-    window = glfw.create_window(mode.size.width, mode.size.height, "FieldStation42 OSD", monitor, None)
+    window = glfw.create_window(mode.size.width, mode.size.height, "myHomeTV OSD", monitor, None)
     glfw.make_context_current(window)
     glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
 

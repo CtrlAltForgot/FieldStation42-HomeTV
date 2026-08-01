@@ -4,6 +4,10 @@ from typing import Optional, List, Dict, Any
 from fs42.station_manager import StationManager
 from fs42.station_io import StationIO
 from fs42.liquid_manager import LiquidManager
+from fs42.broadcast_scheduler import BroadcastHistory
+from fs42.broadcast_scheduler import BroadcastScheduler
+from fs42.catalog import ShowCatalog
+import datetime as dt
 
 router = APIRouter(prefix="/stations", tags=["stations"])
 
@@ -73,6 +77,79 @@ async def get_station_config(network_name: str):
         )
 
     return {"network_name": network_name, "station_config": raw_data}
+
+
+@router.get("/{network_name}/scheduler-history")
+async def get_scheduler_history(network_name: str):
+    """Summarize durable aired/reserved state for the scheduler editor."""
+    station_manager = StationManager()
+    if station_manager.station_by_name(network_name) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Station '{network_name}' not found",
+        )
+    history = BroadcastHistory(station_manager.server_conf["db_path"])
+    return {
+        "network_name": network_name,
+        "series": history.summaries(network_name),
+    }
+
+
+@router.get("/{network_name}/scheduler-preview")
+async def preview_scheduler(network_name: str, day: str, hour: int, weeks: int = 6):
+    """Project weekly choices in memory without reserving or changing history."""
+    manager = StationManager()
+    station = manager.station_by_name(network_name)
+    if station is None:
+        raise HTTPException(404, f"Station '{network_name}' not found")
+    day = day.casefold()
+    weekdays = {
+        name: index for index, name in enumerate(
+            ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+        )
+    }
+    if day not in weekdays or not 0 <= hour <= 23 or not 1 <= weeks <= 12:
+        raise HTTPException(400, "Invalid scheduler preview range")
+    slot = station.get(day, {}).get(str(hour), station.get(day, {}).get(hour))
+    if not isinstance(slot, dict) or not isinstance(slot.get("programming"), dict):
+        raise HTTPException(400, "This slot does not have a realistic scheduler policy")
+    tags = slot.get("tags")
+    tag = tags[0] if isinstance(tags, list) and tags else tags
+    if not tag:
+        raise HTTPException(400, "This slot has no content tag")
+    catalog = ShowCatalog(station)
+    candidates = catalog.get_all_by_tag(tag) or []
+    scheduler = BroadcastScheduler(network_name, manager.server_conf["db_path"])
+    today = dt.datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0)
+    days_ahead = (weekdays[day] - today.weekday()) % 7
+    first = today + dt.timedelta(days=days_ahead)
+    if first < dt.datetime.now():
+        first += dt.timedelta(weeks=1)
+    preview = []
+    for index in range(weeks):
+        when = first + dt.timedelta(weeks=index)
+        selected = scheduler.select(slot, str(tag), candidates, when)
+        if not selected:
+            preview.append({
+                "start": when.isoformat(), "status": "fallback",
+                "fallback_tag": slot["programming"].get("fallback_tag")
+                or station.get("fallback_tag"),
+            })
+            continue
+        entry, programming = selected
+        scheduler.stage(
+            programming, when,
+            when + dt.timedelta(seconds=max(1, float(entry.duration))),
+        )
+        preview.append({
+            "start": when.isoformat(),
+            "status": programming["airing_kind"],
+            "series": programming["series"],
+            "season": programming["season"],
+            "episode": programming["episode"],
+            "part": programming.get("part", ""),
+        })
+    return {"network_name": network_name, "slot_id": slot["programming"].get("slot_id"), "preview": preview}
 
 @router.post("", response_model=StationConfigResponse, status_code=status.HTTP_201_CREATED)
 async def create_station(config: StationConfigRequest):

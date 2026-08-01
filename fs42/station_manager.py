@@ -57,8 +57,16 @@ class StationManager(object):
                 )
                 if os.environ.get("FS42_DB_PATH"):
                     self.server_conf["db_path"] = os.environ["FS42_DB_PATH"]
-                if os.environ.get("TMDB_API_KEY"):
+                if os.environ.get("TMDB_API_KEY") and not self.server_conf.get(
+                    "tmdb_api_key"
+                ):
                     self.server_conf["tmdb_api_key"] = os.environ["TMDB_API_KEY"]
+                if os.environ.get("OPENSUBTITLES_API_KEY") and not self.server_conf.get(
+                    "opensubtitles_api_key"
+                ):
+                    self.server_conf["opensubtitles_api_key"] = os.environ[
+                        "OPENSUBTITLES_API_KEY"
+                    ]
                 self.load_json_stations()
             self.guide_config = None
             for i in range(len(self.stations)):
@@ -129,6 +137,7 @@ class StationManager(object):
                     "server_port",
                     "normalize_titles",
                     "tmdb_api_key",
+                    "opensubtitles_api_key",
                     "recall_last_channel",
                     "schedule_agent",
                     "video_seek_timeout",

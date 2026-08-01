@@ -302,3 +302,10 @@ def get_tmdb_helper() -> TMDBHelper:
     if _tmdb_helper is None:
         _tmdb_helper = TMDBHelper()
     return _tmdb_helper
+
+
+def refresh_tmdb_helper() -> TMDBHelper:
+    """Reload credentials after an in-app settings update."""
+    global _tmdb_helper
+    _tmdb_helper = TMDBHelper()
+    return _tmdb_helper

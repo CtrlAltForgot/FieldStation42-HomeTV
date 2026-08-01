@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -145,9 +146,16 @@ class MetadataEnricher:
                     )
                     enriched = enriched or dict(existing)
                     if not art_exists and not enriched.get("artwork_file"):
-                        artwork_file = self.ensure_local_artwork(path)
+                        identity = _episode_identity(path, enriched)
+                        artwork_file = (
+                            self.ensure_series_artwork(identity["series"], path)
+                            if identity.get("series")
+                            else self.ensure_local_artwork(path)
+                        )
                         if artwork_file:
                             enriched["artwork_file"] = artwork_file
+                            if identity.get("series"):
+                                enriched["series_artwork_file"] = artwork_file
                             enriched["artwork_source"] = "video-still"
                 except Exception as exc:
                     LOG.warning("Metadata enrichment failed for %s: %s", path, exc)
@@ -175,6 +183,7 @@ class MetadataEnricher:
 
     def _enrich(self, path: str, existing: dict) -> dict | None:
         if MediaProcessor.is_movie(path, existing):
+            series_artwork = False
             result = self.helper.search_movie(_movie_query(path, existing))
             if not result:
                 return None
@@ -190,6 +199,7 @@ class MetadataEnricher:
             }
             art_url = result.get("backdrop_url") or result.get("poster_url")
         else:
+            series_artwork = True
             identity = _episode_identity(path, existing)
             series = identity.get("series") or existing.get("show_title")
             if not series:
@@ -224,7 +234,7 @@ class MetadataEnricher:
                     plot=episode.get("overview") or remote["plot"],
                     aired=episode.get("air_date") or "",
                 )
-            art_url = (episode or {}).get("still_url") or result.get("backdrop_url") or result.get("poster_url")
+            art_url = result.get("backdrop_url") or result.get("poster_url")
         remote = {key: value for key, value in remote.items() if value not in (None, "", [])}
         # Local NFO data wins for episode-specific facts, while TMDB's en-US
         # show title intentionally wins so anime and foreign series display in
@@ -234,9 +244,14 @@ class MetadataEnricher:
             merged["show_title"] = remote["show_title"]
             merged["original_show_title"] = remote.get("original_show_title", "")
         if art_url:
-            artwork_file = self._download_artwork(path, art_url)
+            artwork_file = self._download_artwork(
+                f"series:{remote.get('show_title', path)}" if series_artwork else path,
+                art_url,
+            )
             if artwork_file:
                 merged["artwork_file"] = artwork_file
+                if series_artwork:
+                    merged["series_artwork_file"] = artwork_file
         return merged
 
     def _download_artwork(self, media_path: str, url: str) -> str | None:
@@ -300,3 +315,20 @@ class MetadataEnricher:
                     temporary.unlink(missing_ok=True)
         LOG.warning("Could not extract cached artwork from %s", media_path)
         return None
+
+    def ensure_series_artwork(self, series: str, media_path: str) -> str | None:
+        """Cache one stable, spoiler-safe representative image per series."""
+        name = hashlib.sha256(
+            f"series-artwork\0{series.casefold().strip()}".encode()
+        ).hexdigest() + ".jpg"
+        self.art_dir.mkdir(parents=True, exist_ok=True)
+        target = self.art_dir / name
+        if target.is_file() and target.stat().st_size:
+            return name
+        local_name = self.ensure_local_artwork(media_path)
+        if not local_name:
+            return None
+        with ARTWORK_LOCK:
+            if not target.is_file():
+                shutil.copyfile(self.art_dir / local_name, target)
+        return name

@@ -18,7 +18,7 @@ class WebRender(QMainWindow):
         settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True)
 
         # Set custom user agent for identification
-        self.browser.page().profile().setHttpUserAgent("FieldStation42-WebRender/1.0")
+        self.browser.page().profile().setHttpUserAgent("myHomeTV-WebRender/1.0")
 
         # Set black background color
         self.browser.page().setBackgroundColor(Qt.black)

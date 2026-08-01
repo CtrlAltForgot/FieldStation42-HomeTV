@@ -113,7 +113,7 @@ class DiagnosticApp(tk.Tk):
     def __init__(self, user_conf, queue=None):
         super().__init__()
 
-        self.title("FieldStation42 Guide")
+        self.title("myHomeTV Diagnostics")
 
         # set defaults, just in case
         if "width" not in user_conf:

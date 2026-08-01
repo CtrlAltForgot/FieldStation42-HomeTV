@@ -402,6 +402,9 @@ def _attach_meta(blocks, read_meta: bool = True):
         )
         for key, value in display.items():
             setattr(block, key, value)
+        programming = getattr(block, "programming", None)
+        if isinstance(programming, dict):
+            block.airing_kind = programming.get("airing_kind")
     return blocks
 
 @router.get("/search_all")

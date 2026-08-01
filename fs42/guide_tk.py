@@ -24,9 +24,9 @@ class GuideWindowConf:
         self.pad = 10
 
         self.messages = [
-            "Hello FieldStation42\nGuide preview",
+            "Hello myHomeTV\nGuide preview",
             "Cheers!\nFrom us to you!",
-            "FieldStation42 Guide\nOn cable mode.",
+            "myHomeTV Guide\nOn cable mode.",
         ]
         self.message_rotation_rate = 10
         self.message_fg = "white"
@@ -47,7 +47,7 @@ class GuideWindowConf:
         self.schedule_border_width = 4
         self.schedule_border_relief = "raised"
 
-        self.footer_messages = ["You are watching FieldStation42", "Now with cable mode."]
+        self.footer_messages = ["You are watching myHomeTV", "Now with cable mode."]
         self.footer_height = 50
 
         self.schedule_row_count = 3
@@ -391,7 +391,7 @@ class GuideApp(tk.Tk):
         print(f"2. Your screen is {self.winfo_screenheight()} pixels tall")
         print("3. All humans should be treated with dignity.")
 
-        self.title("FieldStation42 Guide")
+        self.title("myHomeTV Guide")
 
         # set defaults, just in case
         if "width" not in user_conf:

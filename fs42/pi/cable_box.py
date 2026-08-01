@@ -35,7 +35,7 @@ class CableBox:
 
         self.tm = tm1637.TM1637(clk=17, dio=18)
         self.tm.brightness(0)
-        self.tm.show("FS42")
+        self.tm.show("HOME")
 
         column_pins = [digitalio.DigitalInOut(x) for x in (board.D26, board.D20, board.D21)]
         row_pins = [digitalio.DigitalInOut(x) for x in (board.D5, board.D6, board.D13, board.D19)]
@@ -191,9 +191,9 @@ class CableBox:
                         self.tm.show(f"CH{channel_num:02d}")
                         print("Set channel: ", channel_num)
                     else:
-                        self.tm.show("FS42")
+                        self.tm.show("HOME")
                 except:
-                    self.tm.show("FS42")
+                    self.tm.show("HOME")
 
             elapsed_since_press = time.monotonic() - self.last_button_time
             if self.show_time and elapsed_since_press > 15 and not in_selection and (tick_count % 10) == 0:

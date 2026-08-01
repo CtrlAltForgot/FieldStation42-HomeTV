@@ -292,6 +292,7 @@
       } else {
         playbackStarted = await attach(result.playlist_url, signal, false);
       }
+      applySubtitleMode();
       // Playback completion, not wall time, owns item transitions. This late
       // watchdog only recovers a browser that never emits `ended`; it can
       // never truncate buffered commercial frames.
@@ -408,12 +409,31 @@
     button.querySelector("span").textContent = labels[subtitleMode];
     button.setAttribute("aria-label", `Subtitles: ${labels[subtitleMode].replace("CC ", "")}`);
   }
+  function applySubtitleMode() {
+    video.querySelectorAll("track[data-myhometv]").forEach(track => track.remove());
+    if (subtitleMode === "off" || !sessionId) return;
+    const track = document.createElement("track");
+    track.kind = "subtitles";
+    track.srclang = "en";
+    track.label = "English";
+    track.dataset.myhometv = "true";
+    track.src = `/api/watch/sessions/${sessionId}/subtitles.vtt?mode=${encodeURIComponent(subtitleMode)}`;
+    track.default = true;
+    track.addEventListener("load", () => { track.track.mode = "showing"; });
+    track.addEventListener("error", () => {
+      if (subtitleMode === "english") {
+        message.textContent = "English subtitles are not available for this program.";
+        setTimeout(() => { if (!isTuning) message.textContent = ""; }, 2500);
+      }
+    });
+    video.append(track);
+  }
   document.querySelector("#subtitles").onclick = () => {
     const modes = ["auto", "english", "off"];
     subtitleMode = modes[(modes.indexOf(subtitleMode) + 1) % modes.length];
     localStorage.setItem("fs42-subtitles", subtitleMode);
     renderSubtitleMode();
-    if (channelSelect.value) tune(channelSelect.value);
+    applySubtitleMode();
   };
   function setGuideVisible(visible) {
     const guide = document.querySelector("#guide");

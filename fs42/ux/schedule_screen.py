@@ -16,7 +16,7 @@ class ScheduleScreen(Screen):
     CSS_PATH = "catalog_screen.tcss"
 
     def compose(self) -> ComposeResult:
-        yield Header("Welcome to Station42")
+        yield Header("Welcome to myHomeTV")
         self.dt = DataTable()
 
         self.options = []
@@ -99,7 +99,7 @@ class ScheduleScreen(Screen):
                 self.app.pop_screen()
 
     def on_mount(self) -> None:
-        self.title = "FieldStation42"
+        self.title = "myHomeTV"
         self.sub_title = "Control Panel"
         self.dt.styles.height = "85%"
         self.dt.styles.width = "100%"

@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import mimetypes
 import re
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -118,6 +119,31 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
         raise _watch_error(exc)
 
     metadata = MetadataIO.read(str(approved)) or {}
+    requested_time = at or dt.datetime.now()
+    now = dt.datetime.now(tz=requested_time.tzinfo)
+    is_future = requested_time > now + dt.timedelta(seconds=60)
+    if is_future:
+        series_name = str(metadata.get("show_title", "")).strip()
+        if not series_name:
+            parent = approved.parent
+            if re.match(r"(?i)^(?:season[ ._-]*|s)\d+$", parent.name):
+                parent = parent.parent
+            series_name = parent.name
+        series_artwork = Path(str(metadata.get("series_artwork_file", ""))).name
+        if not re.fullmatch(r"[a-f0-9]{64}\.jpg", series_artwork):
+            series_artwork = await asyncio.to_thread(
+                MetadataEnricher().ensure_series_artwork,
+                series_name,
+                str(approved),
+            )
+        if series_artwork:
+            managed_series_art = (artwork_root() / series_artwork).resolve()
+            if managed_series_art.parent == artwork_root() and managed_series_art.is_file():
+                return FileResponse(
+                    managed_series_art,
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=86400"},
+                )
     artwork_file = Path(str(metadata.get("artwork_file", ""))).name
     if artwork_file and re.fullmatch(r"[a-f0-9]{64}\.jpg", artwork_file):
         managed_art = (artwork_root() / artwork_file).resolve()
@@ -168,6 +194,7 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 async def create_session(body: SessionRequest, request: Request):
     session = None
+    started_at = time.monotonic()
     try:
         manager = _manager(request)
         boundary_at = body.boundary_at
@@ -212,6 +239,15 @@ async def create_session(body: SessionRequest, request: Request):
         return {
             "session_id": session.session_id,
             "playlist_url": f"/api/watch/sessions/{session.session_id}/master.m3u8",
+            "tune_metrics": {
+                "playlist_ready_ms": round(
+                    (time.monotonic() - started_at) * 1000
+                ),
+                "shared_broadcast_age_ms": round(
+                    max(0, time.monotonic() - session.created_at)
+                    * 1000
+                ),
+            },
             "now": _now_payload(
                 airing, __import__("datetime").datetime.now()
             ),
@@ -229,6 +265,23 @@ async def create_session(body: SessionRequest, request: Request):
 @router.get("/sessions/{session_id}/master.m3u8")
 async def playlist(session_id: str, request: Request):
     return await _serve_asset(session_id, "master.m3u8", request)
+
+
+@router.get("/sessions/{session_id}/subtitles.vtt")
+async def subtitles(session_id: str, request: Request, mode: str = "auto"):
+    try:
+        path = await asyncio.to_thread(
+            _manager(request).subtitle_asset, session_id, mode
+        )
+    except (KeyError, ValueError):
+        raise HTTPException(404, "Subtitle track is unavailable")
+    if path is None:
+        raise HTTPException(404, "No matching English subtitle track was found")
+    return FileResponse(
+        path,
+        media_type="text/vtt",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/sessions/{session_id}/{asset}")

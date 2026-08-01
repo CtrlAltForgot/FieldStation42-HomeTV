@@ -11,7 +11,7 @@
 </head>
 
 <body>
-    <script src="static/common.js"></script>
+    <script src="/static/common.js?v=myhometv-20260801"></script>
     <script>
         // Initialize page layout
         document.addEventListener('DOMContentLoaded', async function () {
@@ -21,7 +21,7 @@
                 <div class="pure-u-1" style="margin-bottom:2em;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1em;">
                         <h2 style="margin:0;">On Now</h2>
-                        <a href="/static/guide.html" class="pure-button pure-button-primary" style="font-size:0.8em;">View Full Guide</a>
+                        <div style="display:flex;gap:.5em;"><button id="settings-open" class="pure-button" style="font-size:0.8em;">Settings</button><a href="/static/guide.html" class="pure-button pure-button-primary" style="font-size:0.8em;">View Full Guide</a></div>
                     </div>
                     <iframe src="/static/guide_frame.html?compact=1"
                             style="width:100%; height:200px; border:1px solid #666; border-radius:4px; display:block;"
@@ -40,7 +40,7 @@
                 <div id="quick-actions" class="pure-u-1" style="margin-top:1.5em;">
                     <h2>Quick Actions</h2>
                     <p>Catalog rebuilds reset the selected channel's schedule because schedule entries reference catalog IDs.</p>
-                    <p>The metadata scan is incremental and does not reset schedules. It fills missing English program details and artwork when <code>TMDB_API_KEY</code> is configured.</p>
+                    <p>The metadata scan is incremental and does not reset schedules. Configure TMDB and optional missing-subtitle lookup from <strong>Settings</strong> above.</p>
                     <div class="pure-form" style="display:flex;flex-wrap:wrap;gap:.5em;align-items:center;">
                         <select id="quick-station" aria-label="Selected catalog"><option value="all">All stations</option></select>
                         <button class="pure-button quick" data-action="rebuild">Rebuild selected catalog</button>
@@ -68,12 +68,12 @@
                                 </div>
                                 <div class="pure-u-1 pure-u-md-1-6" style="padding:0 0.25em;">
                                     <label for="ticker-header">Header</label>
-                                    <input id="ticker-header" type="text" class="pure-input-1" value="FS42" placeholder="Header">
+                                    <input id="ticker-header" type="text" class="pure-input-1" value="myHomeTV" placeholder="Header">
                                 </div>
                                 <div class="pure-u-1 pure-u-md-1-4" style="padding:0 0.25em;">
                                     <label for="ticker-style">Style</label>
                                     <select id="ticker-style" class="pure-input-1">
-                                        <option value="fieldstation">FieldStation</option>
+                                        <option value="fieldstation">Classic</option>
                                         <option value="breaking">Breaking</option>
                                         <option value="weather">Weather</option>
                                         <option value="sports">Sports</option>
@@ -97,6 +97,20 @@
                     <span style="font-size:1.5em;font-weight:bold;">myHomeTV</span>
                     <span style="margin-left:1em; font-size:1.2em;">Your channels. Your schedule. Your TV.</span>
                 </div>
+                <dialog id="provider-settings" style="width:min(92vw,520px);border:1px solid #465463;border-radius:10px;background:#111821;color:#eef5fb;padding:24px;">
+                    <form id="provider-settings-form" class="pure-form pure-form-stacked">
+                        <h2 style="margin-top:0;">Metadata & subtitle settings</h2>
+                        <p style="color:#9aa8b5;line-height:1.45;">Keys are stored locally in the private myHomeTV configuration and are never shown again.</p>
+                        <label for="settings-tmdb">TMDB v3 API key <span id="tmdb-state"></span></label>
+                        <input id="settings-tmdb" type="password" autocomplete="off" placeholder="Leave blank to keep current key" style="width:100%;">
+                        <label for="settings-opensubs" style="margin-top:1em;">OpenSubtitles API key <span id="opensubs-state"></span></label>
+                        <input id="settings-opensubs" type="password" autocomplete="off" placeholder="Optional; used only for missing English subtitles" style="width:100%;">
+                        <label style="margin-top:1em;"><input id="settings-clear-tmdb" type="checkbox"> Remove TMDB key</label>
+                        <label><input id="settings-clear-opensubs" type="checkbox"> Remove OpenSubtitles key</label>
+                        <p id="settings-status" style="min-height:1.3em;color:#61cfff;"></p>
+                        <div style="display:flex;justify-content:flex-end;gap:.6em;"><button id="settings-cancel" type="button" class="pure-button">Cancel</button><button class="pure-button pure-button-primary" type="submit">Save and test</button></div>
+                    </form>
+                </dialog>
             `;
 
             document.body.innerHTML = await window.fs42Common.createPageLayout('', content);
@@ -174,6 +188,50 @@
         }
         document.addEventListener('fs42-layout-ready', loadStationSummary);
 
+        async function openProviderSettings() {
+            const dialog = document.getElementById('provider-settings');
+            const status = document.getElementById('settings-status');
+            status.textContent = 'Loading…';
+            dialog.showModal();
+            try {
+                const settings = await window.fs42Api.get('settings');
+                document.getElementById('tmdb-state').textContent = settings.tmdb.configured ? `(${settings.tmdb.masked})` : '(not configured)';
+                document.getElementById('opensubs-state').textContent = settings.opensubtitles.configured ? `(${settings.opensubtitles.masked})` : '(not configured)';
+                status.textContent = '';
+            } catch (error) {
+                status.textContent = error.detail || error.message || 'Could not load settings.';
+            }
+        }
+
+        document.addEventListener('click', function(event) {
+            if (event.target.closest('#settings-open')) openProviderSettings();
+            if (event.target.closest('#settings-cancel')) document.getElementById('provider-settings').close();
+        });
+
+        document.addEventListener('submit', async function(event) {
+            if (event.target.id !== 'provider-settings-form') return;
+            event.preventDefault();
+            const status = document.getElementById('settings-status');
+            status.textContent = 'Saving…';
+            try {
+                const result = await window.fs42Api.put('settings', {
+                    tmdb_api_key: document.getElementById('settings-tmdb').value,
+                    opensubtitles_api_key: document.getElementById('settings-opensubs').value,
+                    clear_tmdb: document.getElementById('settings-clear-tmdb').checked,
+                    clear_opensubtitles: document.getElementById('settings-clear-opensubs').checked
+                });
+                document.getElementById('settings-tmdb').value = '';
+                document.getElementById('settings-opensubs').value = '';
+                document.getElementById('settings-clear-tmdb').checked = false;
+                document.getElementById('settings-clear-opensubs').checked = false;
+                document.getElementById('tmdb-state').textContent = result.tmdb.configured ? `(${result.tmdb.masked})` : '(not configured)';
+                document.getElementById('opensubs-state').textContent = result.opensubtitles.configured ? `(${result.opensubtitles.masked})` : '(not configured)';
+                status.textContent = 'Saved. New metadata scans use these settings immediately.';
+            } catch (error) {
+                status.textContent = error.detail || error.message || 'Could not save settings.';
+            }
+        });
+
         document.addEventListener('click', async function(e) {
             const button = e.target.closest('.quick');
             if (!button) return;
@@ -240,7 +298,7 @@
                 e.preventDefault();
                 
                 const message = document.getElementById('ticker-message').value.trim();
-                const header = document.getElementById('ticker-header').value.trim() || 'FS42';
+                const header = document.getElementById('ticker-header').value.trim() || 'myHomeTV';
                 const style = document.getElementById('ticker-style').value;
                 const iterations = parseInt(document.getElementById('ticker-iterations').value) || 2;
                 
@@ -260,7 +318,7 @@
                     if (resp.status === 'success') {
                         // Clear the form
                         document.getElementById('ticker-message').value = '';
-                        document.getElementById('ticker-header').value = 'FS42';
+                        document.getElementById('ticker-header').value = 'myHomeTV';
                         document.getElementById('ticker-style').value = 'fieldstation';
                         document.getElementById('ticker-iterations').value = '2';
                         

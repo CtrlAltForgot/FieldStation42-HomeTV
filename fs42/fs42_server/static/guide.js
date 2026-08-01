@@ -22,6 +22,7 @@
   const scroll = $("#guide-scroll");
   const video = $("#preview-video");
   const art = $("#preview-art");
+  if (video) video.disablePictureInPicture = true;
 
   function api(url, options) {
     return fetch(url, options).then(async response => {
@@ -57,7 +58,9 @@
 
   function resetWindow() {
     const now = new Date();
-    state.start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), Math.floor(now.getMinutes() / 30) * 30);
+    state.start = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes()
+    );
     state.end = new Date(state.start.getTime() + WINDOW_MINUTES * 60_000);
     document.documentElement.style.setProperty("--track-width", `${WINDOW_MINUTES * PIXELS_PER_MINUTE}px`);
   }
@@ -85,7 +88,19 @@
     }
     render();
     selectInitial();
+    prewarmArtwork();
     $("#guide-message").hidden = true;
+  }
+
+  function prewarmArtwork() {
+    const now = new Date();
+    state.rows.forEach(row => {
+      const candidates = row.visibleBlocks.filter(block => new Date(block.end_time) > now).slice(0, 2);
+      candidates.forEach(block => {
+        const image = new Image();
+        image.src = `/api/watch/channels/${encodeURIComponent(row.station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
+      });
+    });
   }
 
   function renderTimeline() {
@@ -149,6 +164,12 @@
         const title = document.createElement("span");
         title.className = "program-title";
         title.textContent = programTitle(block);
+        if (["premiere", "rerun"].includes(block.airing_kind)) {
+          const badge = document.createElement("b");
+          badge.className = `airing-badge ${block.airing_kind}`;
+          badge.textContent = block.airing_kind === "premiere" ? "NEW" : "RERUN";
+          title.prepend(badge);
+        }
         const subtitle = document.createElement("span");
         subtitle.className = "program-subtitle";
         subtitle.textContent = `${formatTime(start)}${block.program_details ? ` · ${block.program_details}` : ""}`;
@@ -229,7 +250,8 @@
     const live = start <= now && end > now;
     const meta = block.meta || {};
     $("#preview-channel").textContent = text(station.channel_number, "—");
-    $("#preview-kicker").textContent = `${live ? "ON NOW" : "UPCOMING"} · CH ${text(station.channel_number, "—")} · ${text(station.network_long_name || station.network_name)}`;
+    const airingLabel = block.airing_kind === "premiere" ? "NEW" : block.airing_kind === "rerun" ? "RERUN" : "";
+    $("#preview-kicker").textContent = `${live ? "ON NOW" : "UPCOMING"}${airingLabel ? ` · ${airingLabel}` : ""} · CH ${text(station.channel_number, "—")} · ${text(station.network_long_name || station.network_name)}`;
     $("#preview-title").textContent = programTitle(block);
     const facts = [`${formatTime(start)}–${formatTime(end)}`];
     if (block.program_details) facts.push(block.program_details);
@@ -427,8 +449,10 @@
   setInterval(updateClockAndMarker, 1000);
   setInterval(() => {
     const expected = new Date();
-    const boundary = new Date(expected.getFullYear(), expected.getMonth(), expected.getDate(), expected.getHours(), Math.floor(expected.getMinutes() / 30) * 30);
-    if (boundary.getTime() !== state.start?.getTime()) returnToNow();
+    // Keep the ordinary guide pinned to "now" instead of gradually exposing
+    // the elapsed portion of the previous half-hour. Backward browsing still
+    // remains available through the explicit navigation action.
+    if (expected - state.start >= 60_000) returnToNow();
   }, REFRESH_INTERVAL);
   load().catch(showError);
 })();

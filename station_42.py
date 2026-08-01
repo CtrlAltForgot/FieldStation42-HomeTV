@@ -34,7 +34,7 @@ class Station42:
 
 def print_outcome(success_messages, failure_messages, console):
     console.print(
-        "[bold blue underline]Finished running FieldStation42.[/bold blue underline]"
+        "[bold blue underline]Finished running myHomeTV.[/bold blue underline]"
     )
 
     if len(success_messages) > 0:
@@ -52,7 +52,7 @@ def print_outcome(success_messages, failure_messages, console):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="FieldStation42 Catalog and Liquid-Schedule Generation"
+        description="myHomeTV catalog and broadcast-schedule generation"
     )
     parser.add_argument(
         "-g",
@@ -167,7 +167,7 @@ def build_parser():
     parser.add_argument(
         "-s", "--server",
         action="store_true",
-        help="Run the FieldStation42 web API server after other actions.",
+        help="Run the myHomeTV web API server after other actions.",
     )
 
     parser.add_argument(
@@ -591,9 +591,9 @@ def main():
     print_outcome(success_messages, failure_messages, console)
 
     if args.server or len(sys.argv) <= 1:
-        info = "\nFS42 web server is running on this machine. You can log into the web gui at http://localhost:4242 to manage catalogs and schedules\n"
+        info = "\nmyHomeTV is running on this machine. Open http://localhost:4242 to manage channels, catalogs, and schedules.\n"
         print()
-        console.print(Panel.fit(info, title="FieldStation42", subtitle="It's Up To You.", border_style=style.Style(color="blue")))
+        console.print(Panel.fit(info, title="myHomeTV", subtitle="Your channels. Your schedule. Your TV.", border_style=style.Style(color="blue")))
         print()
         mount_fs42_api()
         

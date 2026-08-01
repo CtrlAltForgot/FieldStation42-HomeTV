@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/static/station_ui.css">
 </head>
 <body>
-    <script src="/static/common.js"></script>
+    <script src="/static/common.js?v=myhometv-20260801"></script>
     <script src="/static/fs42_client.js"></script>
     <script>
         let allStations = [];
@@ -192,6 +192,7 @@
                             <button class="pure-button pure-button-primary" data-name="${escapeHtml(station.network_name)}" onclick="editStation(this.dataset.name)">
                                 Edit Config
                             </button>
+                            ${type === 'standard' ? `<button class="pure-button" data-name="${escapeHtml(station.network_name)}" onclick="editScheduler(this.dataset.name)">Scheduler</button>` : ''}
                             <button class="pure-button" data-name="${escapeHtml(station.network_name)}" onclick="duplicateStation(this.dataset.name)">
                                 Duplicate
                             </button>
@@ -237,6 +238,10 @@
 
         function editStation(networkName) {
             window.location.href = `station_editor.html?station=${encodeURIComponent(networkName)}`;
+        }
+
+        function editScheduler(networkName) {
+            window.location.href = `scheduler.html?station=${encodeURIComponent(networkName)}`;
         }
 
         function escapeHtml(text) {

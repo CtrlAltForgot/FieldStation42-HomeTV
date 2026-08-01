@@ -56,10 +56,10 @@ button { font: inherit; }
 #preview-loading i { width: 11px; height: 11px; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); border-radius: 50%; animation: preview-spin .8s linear infinite; }
 @keyframes preview-spin { to { transform: rotate(360deg); } }
 
-#preview-copy { min-width: 0; }
+#preview-copy { min-width: 0; padding: 5px 0 10px; overflow: visible; }
 #preview-kicker { margin: 0; color: #63d4ff; font-size: clamp(10px, .8vw, 13px); font-weight: 800; letter-spacing: .16em; }
-#preview-title { margin: 7px 0 5px; overflow: hidden; color: white; font-size: clamp(27px, 3.1vw, 52px); line-height: 1.04; letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
-#preview-meta { min-height: 1.35em; margin: 0 0 10px; color: #d1d9e3; font-size: clamp(13px, 1.15vw, 18px); }
+#preview-title { margin: 7px 0 5px; padding-bottom: .08em; overflow: hidden; color: white; font-size: clamp(27px, 3.1vw, 52px); line-height: 1.12; letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
+#preview-meta { min-height: 1.45em; margin: 0 0 10px; color: #d1d9e3; font-size: clamp(13px, 1.15vw, 18px); line-height: 1.4; }
 #preview-description { max-width: 880px; margin: 0; overflow: hidden; color: var(--muted); font-size: clamp(13px, 1.05vw, 17px); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 #preview-progress { width: min(680px, 100%); height: 3px; margin-top: 18px; overflow: hidden; border-radius: 3px; background: rgba(255,255,255,.13); }
 #preview-progress span { display: block; width: 0; height: 100%; background: var(--accent); box-shadow: 0 0 9px rgba(85,199,255,.65); }
@@ -89,6 +89,8 @@ kbd { padding: 1px 4px; border: 1px solid #485260; border-radius: 3px; color: #c
 .program.current { background: #183f69; border-color: #266aa6; }
 .program.selected { z-index: 5; border-color: white; outline: 4px solid var(--accent); outline-offset: -4px; background: #1765ad; box-shadow: 0 7px 24px rgba(0,0,0,.46); transform: scaleY(1.025); }
 .program-title { display: block; overflow: hidden; font-size: clamp(13px, 1.15vw, 18px); font-weight: 720; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.airing-badge { display: inline-block; margin-right: 7px; padding: 2px 5px; border-radius: 3px; color: #071018; background: #61d2ff; font-size: .58em; font-weight: 900; letter-spacing: .08em; vertical-align: .18em; }
+.airing-badge.rerun { color: #d6e0e9; background: #52606e; }
 .program-subtitle { display: block; margin-top: 4px; overflow: hidden; color: #b6c1cd; font-size: clamp(9px, .75vw, 12px); text-overflow: ellipsis; white-space: nowrap; }
 .program.selected .program-subtitle { color: #e5f5ff; }
 .empty-program { color: #718093; font-style: italic; background: #131922; cursor: default; }

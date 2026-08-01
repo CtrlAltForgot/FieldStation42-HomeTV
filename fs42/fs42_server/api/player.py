@@ -266,7 +266,7 @@ async def show_ticker(request: Request):
     command_queue.put({
         "command": "ticker", 
         "message": data.get("message", ""), 
-        "header": data.get("header", "FS42"), 
+        "header": data.get("header", "myHomeTV"),
         "style": data.get("style", "fieldstation"), 
         "iterations": data.get("iterations", 2)
     })

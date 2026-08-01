@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,6 +22,10 @@ from fs42.hometv import (
 )
 from fs42.media_processor import MediaProcessor
 from fs42.metadata_enrichment import MetadataEnricher
+from fs42.broadcast_scheduler import BroadcastScheduler
+from fs42.schedule_promos import SchedulePromoAgent
+from fs42.subtitle_provider import SubtitleProvider, opensubtitles_hash
+from fs42.channel_bumpers import active_seasons, ensure_channel_folders
 from fs42.fs42_server.api.watch import (
     PLAYLIST_STARTUP_ATTEMPTS,
     PLAYLIST_STARTUP_INTERVAL,
@@ -32,6 +37,7 @@ from fs42.fs42_server.api.watch import (
     create_session as create_session_endpoint,
 )
 from fs42.fs42_server.api import build as build_api
+from fs42.fs42_server.api import settings as settings_api
 from fs42.fs42_server.api.schedules import (
     _attach_meta,
     _episode_display,
@@ -527,6 +533,38 @@ class SessionTests(unittest.TestCase):
             self.assertIs(manager.get(second.session_id).process, processes[0])
             manager.close()
 
+    def test_subtitle_mode_changes_share_stream_without_retuning(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "show.mkv"
+            media.touch()
+            when = dt.datetime.now()
+            airing = Airing(
+                "42", "Test TV", "Show", "Episode", when,
+                when + dt.timedelta(minutes=30), when,
+                when + dt.timedelta(minutes=30), str(media), 0, 1800, 1800,
+            )
+            processes = []
+
+            def factory(command, **_kwargs):
+                process = FakeProcess(command)
+                processes.append(process)
+                return process
+
+            manager = HLSSessionManager(
+                resolver=SimpleNamespace(now=lambda channel: airing),
+                root=Path(temp_dir) / "hls",
+                process_factory=factory,
+            )
+            auto, _ = manager.create("42", subtitle_mode="auto")
+            english, _ = manager.create("42", subtitle_mode="english")
+            off, _ = manager.create("42", subtitle_mode="off")
+            self.assertEqual(
+                {auto.broadcast_id, english.broadcast_id, off.broadcast_id},
+                {auto.broadcast_id},
+            )
+            self.assertEqual(len(processes), 1)
+            manager.close()
+
     def test_automatic_boundary_resolves_exact_next_item_start(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             media = Path(temp_dir) / "commercial.mkv"
@@ -933,6 +971,530 @@ class DatabaseTests(unittest.TestCase):
                 connection.close()
 
 
+class BroadcastSchedulerTests(unittest.TestCase):
+    def _entries(self):
+        return [
+            SimpleNamespace(path=f"/media/Test Show S01E{number:02d}.mkv", realpath=None)
+            for number in range(1, 5)
+        ]
+
+    @staticmethod
+    def _metadata(path):
+        episode = int(Path(path).stem.rsplit("E", 1)[1])
+        return {
+            "type": "episode",
+            "show_title": "Test Show",
+            "season": 1,
+            "episode": episode,
+        }
+
+    def test_future_weeks_reserve_consecutive_premieres_without_marking_aired(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            db_path = str(Path(temp_dir) / "history.db")
+            scheduler = BroadcastScheduler("Channel", db_path)
+            slot = {"programming": {"mode": "premiere", "slot_id": "tue-20"}}
+            starts = [dt.datetime(2026, 8, 4, 20) + dt.timedelta(weeks=i) for i in range(4)]
+            selected_paths = []
+            for start in starts:
+                entry, programming = scheduler.select(slot, "show", self._entries(), start)
+                selected_paths.append(entry.path)
+                scheduler.stage(programming, start, start + dt.timedelta(minutes=30))
+            scheduler.commit()
+            rows = scheduler.history.rows("Channel", "test-show")
+            self.assertEqual(
+                selected_paths,
+                [f"/media/Test Show S01E{i:02d}.mkv" for i in range(1, 5)],
+            )
+            self.assertTrue(all(row[8] == "reserved" for row in rows))
+
+    def test_reruns_use_only_aired_premieres_and_respect_repeat_gap(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            db_path = str(Path(temp_dir) / "history.db")
+            scheduler = BroadcastScheduler("Channel", db_path)
+            premiere_slot = {"programming": {"mode": "premiere", "slot_id": "tue-20"}}
+            rerun_slot = {
+                "programming": {
+                    "mode": "rerun",
+                    "slot_id": "sat-14",
+                    "minimum_rerun_gap_days": 7,
+                }
+            }
+            premiere = dt.datetime.now() - dt.timedelta(days=14)
+            entry, programming = scheduler.select(
+                premiere_slot, "show", self._entries(), premiere
+            )
+            scheduler.stage(programming, premiere, premiere + dt.timedelta(minutes=30))
+            scheduler.commit()
+            scheduler.history.reconcile("Channel", dt.datetime.now())
+
+            rerun = dt.datetime.now() - dt.timedelta(days=2)
+            entry, programming = scheduler.select(
+                rerun_slot, "show", self._entries(), rerun
+            )
+            self.assertTrue(entry.path.endswith("S01E01.mkv"))
+            scheduler.stage(programming, rerun, rerun + dt.timedelta(minutes=30))
+            scheduler.commit()
+            scheduler.history.reconcile("Channel", dt.datetime.now())
+            self.assertIsNone(
+                scheduler.select(rerun_slot, "show", self._entries(), dt.datetime.now())
+            )
+
+    def test_library_end_hold_does_not_wrap_episode_one_as_new(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {
+                "programming": {
+                    "mode": "premiere",
+                    "slot_id": "tue-20",
+                    "library_end_policy": "hold",
+                }
+            }
+            first = dt.datetime.now() - dt.timedelta(weeks=8)
+            for index in range(4):
+                start = first + dt.timedelta(weeks=index)
+                _, programming = scheduler.select(
+                    slot, "show", self._entries(), start
+                )
+                scheduler.stage(
+                    programming, start, start + dt.timedelta(minutes=30)
+                )
+            scheduler.commit()
+            scheduler.history.reconcile("Channel", dt.datetime.now())
+            self.assertIsNone(
+                scheduler.select(slot, "show", self._entries(), dt.datetime.now())
+            )
+
+    def test_library_restart_after_hiatus_is_labeled_rerun(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {
+                "programming": {
+                    "mode": "premiere",
+                    "slot_id": "tue-20",
+                    "library_end_policy": "restart_after_hiatus",
+                    "restart_hiatus_weeks": 2,
+                    "minimum_rerun_gap_days": 0,
+                }
+            }
+            first = dt.datetime.now() - dt.timedelta(weeks=8)
+            for index in range(4):
+                start = first + dt.timedelta(weeks=index)
+                _, programming = scheduler.select(
+                    slot, "show", self._entries(), start
+                )
+                scheduler.stage(
+                    programming, start, start + dt.timedelta(minutes=30)
+                )
+            scheduler.commit()
+            scheduler.history.reconcile("Channel", dt.datetime.now())
+            entry, programming = scheduler.select(
+                slot, "show", self._entries(), dt.datetime.now()
+            )
+            self.assertTrue(entry.path.endswith("S01E01.mkv"))
+            self.assertEqual(programming["airing_kind"], "rerun")
+
+    def test_renamed_episode_keeps_its_logical_premiere_identity(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {
+                "programming": {
+                    "mode": "premiere",
+                    "slot_id": "tue-20",
+                }
+            }
+            old_entry = SimpleNamespace(
+                path="/old/Test Show S01E01.mkv", realpath=None
+            )
+            past = dt.datetime.now() - dt.timedelta(weeks=2)
+            _, programming = scheduler.select(slot, "show", [old_entry], past)
+            scheduler.stage(
+                programming, past, past + dt.timedelta(minutes=30)
+            )
+            scheduler.commit()
+            scheduler.history.reconcile("Channel", dt.datetime.now())
+
+            renamed = [
+                SimpleNamespace(
+                    path="/new/Test Show S01E01.mkv", realpath=None
+                ),
+                SimpleNamespace(
+                    path="/new/Test Show S01E02.mkv", realpath=None
+                ),
+            ]
+            entry, programming = scheduler.select(
+                slot, "show", renamed, dt.datetime.now()
+            )
+            self.assertTrue(entry.path.endswith("S01E02.mkv"))
+            self.assertEqual(programming["airing_kind"], "premiere")
+
+    def test_future_reset_keeps_aired_history_and_releases_reservations(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            past = dt.datetime.now() - dt.timedelta(days=8)
+            future = dt.datetime.now() + dt.timedelta(days=6)
+            for start in (past, future):
+                _, programming = scheduler.select(
+                    slot, "show", self._entries(), start
+                )
+                scheduler.stage(
+                    programming, start, start + dt.timedelta(minutes=30)
+                )
+            scheduler.commit()
+            scheduler.history.release_future("Channel", dt.datetime.now())
+            rows = scheduler.history.rows("Channel", "test-show")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][8], "aired")
+            self.assertTrue(rows[0][2].endswith("S01E01.mkv"))
+
+    def test_weekly_slot_stays_on_wall_clock_across_dst(self):
+        central = ZoneInfo("America/Chicago")
+        for start in (
+            dt.datetime(2026, 3, 3, 20, tzinfo=central),
+            dt.datetime(2026, 10, 27, 20, tzinfo=central),
+        ):
+            following = start + dt.timedelta(weeks=1)
+            self.assertEqual(following.hour, 20)
+            self.assertNotEqual(start.utcoffset(), following.utcoffset())
+            self.assertNotEqual(
+                BroadcastScheduler._occurrence_key(start),
+                BroadcastScheduler._occurrence_key(following),
+            )
+
+    def test_wait_for_missing_does_not_skip_an_episode_gap(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {
+                "programming": {
+                    "mode": "premiere",
+                    "slot_id": "weekly",
+                    "catch_up_policy": "wait_for_missing",
+                    "minimum_rerun_gap_days": 365,
+                }
+            }
+            past = dt.datetime.now() - dt.timedelta(days=14)
+            first = self._entries()[0]
+            _, programming = scheduler.select(slot, "show", [first], past)
+            scheduler.stage(programming, past, past + dt.timedelta(minutes=30))
+            scheduler.commit()
+            scheduler.history.reconcile("Channel", dt.datetime.now())
+            gap_entries = [self._entries()[0], self._entries()[2]]
+            self.assertIsNone(
+                scheduler.select(slot, "show", gap_entries, dt.datetime.now())
+            )
+
+    def test_hiatus_window_suppresses_new_premiere(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            today = dt.datetime.now().date()
+            slot = {
+                "programming": {
+                    "mode": "premiere",
+                    "slot_id": "weekly",
+                    "hiatus_ranges": [{
+                        "start": today.isoformat(),
+                        "end": today.isoformat(),
+                    }],
+                }
+            }
+            self.assertIsNone(
+                scheduler.select(slot, "show", self._entries(), dt.datetime.now())
+            )
+
+    def test_multiweek_cadence_uses_stable_anchor(self):
+        policy = {
+            "premiere_interval_weeks": 2,
+            "cadence_anchor_date": "2026-08-04",
+        }
+        self.assertTrue(BroadcastScheduler._premiere_due(
+            policy, dt.datetime(2026, 8, 4, 20)
+        ))
+        self.assertFalse(BroadcastScheduler._premiere_due(
+            policy, dt.datetime(2026, 8, 11, 20)
+        ))
+        self.assertTrue(BroadcastScheduler._premiere_due(
+            policy, dt.datetime(2026, 8, 18, 20)
+        ))
+
+    def test_specials_and_multipart_episodes_have_deterministic_order(self):
+        entries = [
+            SimpleNamespace(path="/media/Test Show S01E01B.mkv", realpath=None),
+            SimpleNamespace(path="/media/Test Show S01E01A.mkv", realpath=None),
+            SimpleNamespace(path="/media/Test Show S00E01.mkv", realpath=None),
+        ]
+
+        def metadata(path):
+            match = __import__("re").search(r"S(\d+)E(\d+)", path)
+            return {
+                "type": "episode", "show_title": "Test Show",
+                "season": int(match.group(1)), "episode": int(match.group(2)),
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            chosen = []
+            for index in range(3):
+                when = dt.datetime(2026, 8, 4, 20) + dt.timedelta(weeks=index)
+                entry, programming = scheduler.select(slot, "show", entries, when)
+                chosen.append(Path(entry.path).stem)
+                scheduler.stage(programming, when, when + dt.timedelta(minutes=30))
+            self.assertEqual(
+                chosen,
+                [
+                    "Test Show S00E01",
+                    "Test Show S01E01A",
+                    "Test Show S01E01B",
+                ],
+            )
+
+    def test_duplicate_encode_does_not_receive_a_second_premiere(self):
+        entries = [
+            SimpleNamespace(path="/media/a/Test Show S01E01.mkv", realpath=None),
+            SimpleNamespace(path="/media/b/Test Show S01E01.mp4", realpath=None),
+            SimpleNamespace(path="/media/Test Show S01E02.mkv", realpath=None),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            first = dt.datetime(2026, 8, 4, 20)
+            _, programming = scheduler.select(slot, "show", entries, first)
+            scheduler.stage(programming, first, first + dt.timedelta(minutes=30))
+            entry, _ = scheduler.select(slot, "show", entries, first + dt.timedelta(weeks=1))
+            self.assertTrue(entry.path.endswith("S01E02.mkv"))
+
+    def test_newly_discovered_later_episode_appends_after_reservations(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler(
+                "Channel", str(Path(temp_dir) / "history.db")
+            )
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            first = dt.datetime(2026, 8, 4, 20)
+            initial = self._entries()[:2]
+            for index in range(2):
+                when = first + dt.timedelta(weeks=index)
+                _, programming = scheduler.select(slot, "show", initial, when)
+                scheduler.stage(programming, when, when + dt.timedelta(minutes=30))
+            scheduler.commit()
+            entry, _ = scheduler.select(
+                slot, "show", self._entries()[:3], first + dt.timedelta(weeks=2)
+            )
+            self.assertTrue(entry.path.endswith("S01E03.mkv"))
+
+
+class SchedulePromoTests(unittest.TestCase):
+    def test_promo_copy_distinguishes_premiere_episode_and_finale(self):
+        when = dt.datetime(2026, 8, 6, 18)
+        self.assertIn(
+            "New season premieres Thursday",
+            SchedulePromoAgent._copy({"series": "Show", "season_premiere": True}, when)[1],
+        )
+        self.assertIn(
+            "New episode Thursday",
+            SchedulePromoAgent._copy({"series": "Show"}, when)[1],
+        )
+        self.assertIn(
+            "Season finale Thursday",
+            SchedulePromoAgent._copy({"series": "Show", "season_finale": True}, when)[1],
+        )
+
+    def test_promo_is_spaced_and_attached_before_real_premiere(self):
+        now = dt.datetime(2026, 8, 4, 12)
+
+        def block(start, programming=None, buffer=480):
+            item = SimpleNamespace(
+                start_time=start,
+                content=SimpleNamespace(path="/media/show.mkv"),
+                programming=programming,
+                start_bump=None,
+                break_info={},
+            )
+            item.buffer_duration = lambda: buffer
+            return item
+
+        promo_target = block(now)
+        premiere = block(
+            now + dt.timedelta(hours=6),
+            {
+                "airing_kind": "premiere",
+                "series": "Test Show",
+                "series_key": "test-show",
+                "media_path": "/media/Test Show S01E02.mkv",
+                "episode": 2,
+            },
+        )
+        with patch.object(
+            SchedulePromoAgent, "_render", return_value=Path("/promos/test.mp4")
+        ):
+            count = SchedulePromoAgent.apply(
+                {
+                    "network_name": "Channel",
+                    "schedule_promos": {"intensity": "frequent"},
+                },
+                [promo_target, premiere],
+            )
+        self.assertEqual(count, 1)
+        self.assertEqual(promo_target.start_bump["duration"], 6)
+        self.assertEqual(
+            promo_target.break_info["_scheduled_promo"]["series"],
+            "Test Show",
+        )
+
+    def test_channel_bumper_tree_and_season_windows(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ, {"FS42_CHANNEL_BUMPER_DIR": temp_dir}
+        ):
+            folders = ensure_channel_folders("Toon Mix")
+            self.assertTrue(all(folder.is_dir() for folder in folders.values()))
+            self.assertIn(
+                "christmas", active_seasons(dt.datetime(2026, 12, 24))
+            )
+            self.assertIn(
+                "new-years", active_seasons(dt.datetime(2026, 12, 31))
+            )
+            self.assertNotIn(
+                "halloween", active_seasons(dt.datetime(2026, 8, 1))
+            )
+
+
+class SubtitleProviderTests(unittest.TestCase):
+    def test_file_hash_is_stable_and_size_sensitive(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "episode.mkv"
+            media.write_bytes(bytes(range(256)) * 512)
+            first = opensubtitles_hash(str(media))
+            second = opensubtitles_hash(str(media))
+            self.assertEqual(first, second)
+            self.assertEqual(first[1], 131072)
+
+    def test_provider_refuses_title_only_non_hash_match(self):
+        class Response:
+            content = b""
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return {
+                    "data": [{
+                        "id": "feature",
+                        "attributes": {
+                            "moviehash_match": False,
+                            "files": [{"file_id": 42}],
+                        },
+                    }]
+                }
+
+        session = SimpleNamespace(get=lambda *args, **kwargs: Response())
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ, {"FS42_SUBTITLE_CACHE_DIR": str(Path(temp_dir) / "subs")}
+        ):
+            media = Path(temp_dir) / "episode.mkv"
+            media.write_bytes(b"x" * 131072)
+            provider = SubtitleProvider(api_key="test-api-key", session=session)
+            self.assertIsNone(provider.fetch_english(str(media)))
+
+
+class ProviderSettingsTests(unittest.TestCase):
+    def test_provider_keys_persist_atomically_and_response_is_redacted(self):
+        manager = settings_api.StationManager()
+        previous = manager.server_conf.get("tmdb_api_key")
+        previous_subtitles = manager.server_conf.get("opensubtitles_api_key")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+                settings_api, "CONFIG_PATH", Path(temp_dir) / "main_config.json"
+            ), patch.object(settings_api, "refresh_tmdb_helper"), patch.object(
+                settings_api, "_validate_tmdb_key"
+            ) as validate:
+                response = asyncio.run(settings_api.save_settings(
+                    settings_api.ProviderSettings(
+                        tmdb_api_key="a" * 32,
+                        opensubtitles_api_key="subtitle-key",
+                    )
+                ))
+                saved = json.loads(
+                    settings_api.CONFIG_PATH.read_text(encoding="utf-8")
+                )
+                self.assertEqual(saved["tmdb_api_key"], "a" * 32)
+                self.assertNotIn("a" * 32, json.dumps(response))
+                self.assertEqual(response["tmdb"]["masked"], "••••aaaa")
+                validate.assert_called_once_with("a" * 32)
+        finally:
+            if previous is None:
+                manager.server_conf.pop("tmdb_api_key", None)
+            else:
+                manager.server_conf["tmdb_api_key"] = previous
+            if previous_subtitles is None:
+                manager.server_conf.pop("opensubtitles_api_key", None)
+            else:
+                manager.server_conf["opensubtitles_api_key"] = previous_subtitles
+
+    def test_rejected_tmdb_key_does_not_replace_known_good_settings(self):
+        manager = settings_api.StationManager()
+        previous = manager.server_conf.get("tmdb_api_key")
+        manager.server_conf["tmdb_api_key"] = "b" * 32
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+                settings_api, "CONFIG_PATH", Path(temp_dir) / "main_config.json"
+            ), patch.object(
+                settings_api,
+                "_validate_tmdb_key",
+                side_effect=HTTPException(400, "TMDB rejected that key"),
+            ):
+                settings_api.CONFIG_PATH.write_text(
+                    json.dumps({"tmdb_api_key": "b" * 32}), encoding="utf-8"
+                )
+                with self.assertRaises(HTTPException):
+                    asyncio.run(settings_api.save_settings(
+                        settings_api.ProviderSettings(tmdb_api_key="c" * 32)
+                    ))
+                saved = json.loads(
+                    settings_api.CONFIG_PATH.read_text(encoding="utf-8")
+                )
+                self.assertEqual(saved["tmdb_api_key"], "b" * 32)
+        finally:
+            if previous is None:
+                manager.server_conf.pop("tmdb_api_key", None)
+            else:
+                manager.server_conf["tmdb_api_key"] = previous
+
+
 class MetadataEnrichmentTests(unittest.TestCase):
     def test_scan_caches_fallback_artwork_without_tmdb(self):
         class Helper:
@@ -956,7 +1518,7 @@ class MetadataEnrichmentTests(unittest.TestCase):
             enricher.art_dir = Path(temp_dir) / "art"
             artwork_name = "a" * 64 + ".jpg"
             with patch.object(
-                enricher, "ensure_local_artwork", return_value=artwork_name
+                enricher, "ensure_series_artwork", return_value=artwork_name
             ):
                 stats = enricher.scan([media_path])
             with connect(db_path) as connection:

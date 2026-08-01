@@ -13,6 +13,7 @@ from fs42.liquid_blocks import ReelBlock
 from fs42.media_processor import MediaProcessor
 from fs42.sequence_api import SequenceAPI
 from fs42.autobump_agent import AutoBumpAgent
+from fs42.channel_bumpers import active_channel_folders, channel_slug
 
 
 
@@ -63,6 +64,9 @@ class ShowCatalog:
     def __init__(self, config, rebuild_catalog=False, load=True, debug=False, force=False, skip_chapter_scan=False):
         self.config = config
         self._l = logging.getLogger(f"{self.config['network_name']} - CAT")
+        self.channel_bump_tag = self.config.get("bump_dir") or (
+            f":channel-bumps:{channel_slug(self.config['network_name'])}"
+        )
 
         # the main index for videos
         self.clip_index = {}
@@ -113,6 +117,23 @@ class ShowCatalog:
             if entry.tag not in self.clip_index:
                 self.clip_index[entry.tag] = []
             self.clip_index[entry.tag].append(entry)
+
+        # Channel/season folders retain their own persisted tags. Rebuild the
+        # active aggregate whenever a catalog is loaded in a fresh process.
+        aggregate = self.clip_index.setdefault(self.channel_bump_tag, [])
+        for folder in active_channel_folders(self.config["network_name"]):
+            folder_tag = str(folder)
+            if folder_tag != self.channel_bump_tag:
+                aggregate.extend(self.clip_index.get(folder_tag, []))
+            for suffix in (
+                f"-{ShowCatalog.prebump}", f"-{ShowCatalog.postbump}"
+            ):
+                source = folder_tag + suffix
+                target = self.channel_bump_tag + suffix
+                if source != target and source in self.clip_index:
+                    self.clip_index.setdefault(target, []).extend(
+                        self.clip_index[source]
+                    )
 
     def build_catalog(self):
         self._l.info(f"Starting catalog build for {self.config['network_name']}")
@@ -271,12 +292,33 @@ class ShowCatalog:
         for tag in self.tags:
             total_count += self._scan_directory(tag)
 
+        # Always scaffold the channel-owned bumper library, even for stations
+        # that predate (or intentionally omit) the legacy shared bump_dir.
+        channel_bump_folders = active_channel_folders(
+            self.config["network_name"]
+        )
         # add commercial and bumps to the tags
         if "commercial_dir" in self.config and self.config["commercial_dir"]:
             total_count += self._scan_directory(self.config["commercial_dir"], content_type="commercial")
         # setup the general bump dir
         if "bump_dir" in self.config and self.config["bump_dir"]:
             total_count += self._scan_directory(self.config["bump_dir"], is_bumps=True, content_type="bump")
+        base_bump_tag = self.channel_bump_tag
+        self.clip_index.setdefault(base_bump_tag, [])
+        for folder in channel_bump_folders:
+            seasonal_tag = str(folder)
+            total_count += self._scan_directory(
+                seasonal_tag, is_bumps=True, content_type="bump"
+            )
+            for suffix in (
+                "", f"-{ShowCatalog.prebump}", f"-{ShowCatalog.postbump}"
+            ):
+                source_key = seasonal_tag + suffix
+                target_key = base_bump_tag + suffix
+                if source_key in self.clip_index:
+                    self.clip_index.setdefault(target_key, []).extend(
+                        self.clip_index[source_key]
+                    )
 
         for override_dir in bump_overrides:
             total_count += self._scan_directory(override_dir, is_bumps=True, content_type="bump")

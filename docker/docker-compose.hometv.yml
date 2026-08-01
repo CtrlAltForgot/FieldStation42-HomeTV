@@ -24,6 +24,8 @@ services:
       FS42_SCAN_CONCURRENCY: "${FS42_SCAN_CONCURRENCY:-2}"
       FS42_SCAN_THREADS: "${FS42_SCAN_THREADS:-1}"
       TMDB_API_KEY: "${TMDB_API_KEY:-}"
+      OPENSUBTITLES_API_KEY: "${OPENSUBTITLES_API_KEY:-}"
+      FS42_CHANNEL_BUMPER_DIR: "/app/catalog/channel_bumpers"
       TZ: "${TZ:-America/Chicago}"
     volumes:
       - "${FS42_MEDIA_PATH:?Set FS42_MEDIA_PATH}:/media:ro"

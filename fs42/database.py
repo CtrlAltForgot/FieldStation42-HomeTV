@@ -1,4 +1,4 @@
-"""Shared SQLite connection policy for FieldStation42 runtime databases."""
+"""Shared SQLite connection policy for myHomeTV runtime databases."""
 
 import os
 import sqlite3

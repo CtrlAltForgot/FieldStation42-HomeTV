@@ -20,6 +20,8 @@ from fs42.station_manager import StationManager
 from fs42.liquid_io import LiquidIO
 from fs42.media_processor import MediaProcessor
 from fs42.metadata_io import MetadataIO
+from fs42.broadcast_scheduler import BroadcastScheduler
+from fs42.schedule_promos import SchedulePromoAgent
 
 # logging.basicConfig(format="%(asctime)s %(levelname)s:%(name)s:%(message)s", level=logging.INFO)
 
@@ -35,7 +37,11 @@ class LiquidSchedule:
         # self.conf = TagHintReader.smooth_tags(conf)
         self.conf = conf
         self.catalog = ShowCatalog(conf)
+        self.broadcast_scheduler = BroadcastScheduler(
+            conf["network_name"], StationManager().server_conf["db_path"]
+        )
         self._load_blocks()
+        self.broadcast_scheduler.sync_blocks(self._blocks)
 
     def _calc_target_duration(self, duration, increment=None):
         # get the target duration for the show based on the schedule increment
@@ -96,10 +102,26 @@ class LiquidSchedule:
     def _fill(self, slot_config, tag_str, current_mark, tag_index=None, exclusion_index=None) -> LiquidBlock:
         seq_key = None
         candidate = None
+        programming = None
         new_block = None
         next_mark = None
+        realistic = slot_config.get("programming")
+        if isinstance(realistic, dict):
+            selected = self.broadcast_scheduler.select(
+                slot_config,
+                tag_str,
+                self.catalog.get_all_by_tag(tag_str) or [],
+                current_mark,
+            )
+            if selected:
+                candidate, programming = selected
+            else:
+                raise MatchingContentNotFound(
+                    f"No eligible {realistic.get('mode', 'mixed')} episode "
+                    f"for {tag_str} at {current_mark}"
+                )
         # see if this is a series with a sequence defined
-        if "sequence" in slot_config:
+        elif "sequence" in slot_config:
             seq_name = slot_config["sequence"]
             
             if slot_config.get("sequence_strategy") == "random_show" and tag_index is not None:
@@ -169,6 +191,9 @@ class LiquidSchedule:
             # add sequence information
             if seq_key:
                 new_block.sequence_key = seq_key
+            if programming:
+                new_block.programming = programming
+                new_block.break_info["_programming"] = programming
         else:
             # this should only happen on an error (have a tag, but no candidate)
             raise MatchingContentNotFound(
@@ -218,7 +243,10 @@ class LiquidSchedule:
         if "end_bump" in slot_config:
             break_info["end_bump"] = self.catalog.get_end_bump(slot_config["end_bump"])
 
-        break_info["bump_dir"] = slot_config.get("bump_dir", self.conf.get("bump_dir", None))
+        break_info["bump_dir"] = slot_config.get(
+            "bump_dir",
+            self.conf.get("bump_dir", getattr(self.catalog, "channel_bump_tag", None)),
+        )
         break_info["commercial_dir"] = slot_config.get("commercial_dir", self.conf.get("commercial_dir", None))
 
         break_strategy = slot_config.get("break_strategy", self.conf["break_strategy"])
@@ -423,8 +451,14 @@ class LiquidSchedule:
                     except ClipShowKickBack as e:
                         new_block, next_mark = self._clip_fill(e.clip_tag, current_mark, slot_config)
                     except MatchingContentNotFound as e:
-                        if "fallback_tag" in self.conf:
-                            fb_config = {"tags": self.conf["fallback_tag"]}
+                        slot_fallback = (
+                            slot_config.get("programming", {}).get("fallback_tag")
+                            if isinstance(slot_config.get("programming"), dict)
+                            else None
+                        )
+                        fallback_tag = slot_fallback or self.conf.get("fallback_tag")
+                        if fallback_tag:
+                            fb_config = {"tags": fallback_tag}
                             new_block, next_mark = self._fill(fb_config, fb_config["tags"], current_mark, tag_index=tag_index, exclusion_index=exclusion_index)
                         else:
                             self._l.warning("Content not found, but no fallback_tag specified.")
@@ -463,6 +497,10 @@ class LiquidSchedule:
             current_mark = next_mark
         self._l.info("Content and reel schedules are completed")
 
+        promo_count = SchedulePromoAgent.apply(self.conf, new_blocks)
+        if promo_count:
+            self._l.info("Added %s schedule-aware channel promo(s)", promo_count)
+
         # now, make plans for all the blocks and make list to update play counts
         self._l.info(f"Building plans for {len(new_blocks)} new schedule blocks")
         play_counts = []
@@ -480,7 +518,14 @@ class LiquidSchedule:
             ]
 
             block.make_plan(self.catalog)
-            if block.content:
+            if getattr(block, "programming", None):
+                # Stage only after the complete reel was built successfully.
+                # A failed candidate/fallback must never reserve an episode
+                # that was not actually written into the schedule.
+                self.broadcast_scheduler.stage(
+                    block.programming, block.start_time, block.end_time
+                )
+            if block.content and not getattr(block, "programming", None):
                 # if the block has content, then we need to increment the play count
                 play_counts.append(block.content)
 
@@ -490,6 +535,7 @@ class LiquidSchedule:
         self._blocks = new_blocks
         self._l.info("Saving blocks to disk")
         LiquidAPI.add_blocks(self.conf, new_blocks)
+        self.broadcast_scheduler.commit()
         self._load_blocks()
 
     def _increment(self, how_much):

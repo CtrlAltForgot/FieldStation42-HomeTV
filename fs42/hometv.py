@@ -19,6 +19,7 @@ from typing import Callable
 from fs42.catalog_api import CatalogAPI
 from fs42.liquid_api import LiquidAPI
 from fs42.station_manager import StationManager
+from fs42.subtitle_provider import SubtitleProvider
 
 LOG = logging.getLogger("myHomeTV")
 ASSET_RE = re.compile(r"^(?:master\.m3u8|stream\d+\.ts)$")
@@ -196,16 +197,19 @@ class StreamSession:
     created_at: float
     last_access: float
     broadcast_id: str = ""
-    broadcast_key: tuple[str, str, str, str] | None = None
+    broadcast_key: tuple[str, str, str] | None = None
+    media_path: str = ""
+    media_offset: float = 0.0
 
 
 @dataclass
 class ChannelBroadcast:
     broadcast_id: str
-    key: tuple[str, str, str, str]
+    key: tuple[str, str, str]
     directory: Path
     process: subprocess.Popen
     media_path: str
+    media_offset: float
     item_end: dt.datetime
     created_at: float
     last_access: float
@@ -243,7 +247,7 @@ class HLSSessionManager:
         )
         self.process_factory = process_factory
         self.sessions: dict[str, StreamSession] = {}
-        self.broadcasts: dict[tuple[str, str, str, str], ChannelBroadcast] = {}
+        self.broadcasts: dict[tuple[str, str, str], ChannelBroadcast] = {}
         self._stream_probe_cache: dict[str, tuple[tuple[int, int], list[dict]]] = {}
         self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -297,7 +301,6 @@ class HLSSessionManager:
                 airing.channel_number,
                 profile,
                 airing.item_end.isoformat(),
-                subtitle_mode,
             )
             broadcast = self.broadcasts.get(key)
             if broadcast is not None and (
@@ -313,9 +316,7 @@ class HLSSessionManager:
                     self._evict_unused_broadcast()
                 if len(self.broadcasts) >= self.max_sessions:
                     raise WatchError("The server has reached its channel broadcast limit")
-                broadcast = self._start_broadcast(
-                    key, airing, profile, subtitle_mode
-                )
+                broadcast = self._start_broadcast(key, airing, profile)
 
             session_id = str(uuid.uuid4())
             timestamp = time.monotonic()
@@ -329,6 +330,8 @@ class HLSSessionManager:
                 timestamp,
                 broadcast.broadcast_id,
                 key,
+                broadcast.media_path,
+                broadcast.media_offset,
             )
             self.sessions[session_id] = session
             broadcast.leases.add(session_id)
@@ -343,26 +346,17 @@ class HLSSessionManager:
 
     def _start_broadcast(
         self,
-        key: tuple[str, str, str, str],
+        key: tuple[str, str, str],
         airing: Airing,
         profile: str,
-        subtitle_mode: str,
     ) -> ChannelBroadcast:
         broadcast_id = str(uuid.uuid4())
         directory = self.root / broadcast_id
         directory.mkdir(mode=0o700)
-        streams = (
-            self._cached_probe_streams(airing.media_path)
-            if profile == "auto" else []
-        )
-        subtitle = None
-        if subtitle_mode != "off":
-            subtitle = self._select_english_subtitle(
-                streams, require_foreign_audio=subtitle_mode == "auto"
-            )
-        command = self._ffmpeg_command(
-            airing, profile, directory, subtitle, streams
-        )
+        # Captions are delivered as a browser text track. Keeping them out of
+        # this shared video transcode makes CC changes instant and also removes
+        # FFprobe from the channel-tune critical path.
+        command = self._ffmpeg_command(airing, profile, directory, None, [])
         LOG.info(
             "Starting shared HLS broadcast %s for channel %s at %.3fs (%s)",
             broadcast_id,
@@ -388,6 +382,7 @@ class HLSSessionManager:
             directory,
             process,
             airing.media_path,
+            airing.offset,
             airing.item_end,
             timestamp,
             timestamp,
@@ -486,6 +481,21 @@ class HLSSessionManager:
             _score, codec, index = max(candidates, key=lambda item: item[0])
             return codec, index
         return None
+
+    @staticmethod
+    def _foreign_audio(streams: list[dict]) -> bool:
+        audio = next(
+            (stream for stream in streams if stream.get("codec_type") == "audio"),
+            None,
+        )
+        language = (audio or {}).get("tags", {}).get("language", "und").casefold()
+        title = (audio or {}).get("tags", {}).get("title", "").casefold()
+        if language in {"", "und"}:
+            if any(word in title for word in ("japanese", "jpn", "nihongo")):
+                language = "jpn"
+            elif any(word in title for word in ("english", "eng")):
+                language = "eng"
+        return language not in {"", "und", "eng", "en"}
 
     @staticmethod
     def _english_subtitle(media_path: str) -> tuple[str, int] | None:
@@ -655,6 +665,64 @@ class HLSSessionManager:
             raise ValueError("Invalid HLS asset")
         return target
 
+    def subtitle_asset(self, session_id: str, mode: str) -> Path | None:
+        """Create one cached English WebVTT track without changing video."""
+        if mode not in {"auto", "english"}:
+            raise ValueError("Subtitle mode must be auto or english")
+        session = self.get(session_id)
+        target = session.directory / f"captions-{mode}.vtt"
+        if target.is_file() and target.stat().st_size:
+            return target
+        streams = self._cached_probe_streams(session.media_path)
+        selected = self._select_english_subtitle(
+            streams, require_foreign_audio=mode == "auto"
+        )
+        sidecars = []
+        media = Path(session.media_path)
+        for suffix in (".en.srt", ".eng.srt", ".en.vtt", ".srt", ".vtt"):
+            candidate = media.with_suffix(suffix)
+            if candidate.is_file():
+                sidecars.append(candidate)
+        should_use_external = mode == "english" or (
+            mode == "auto" and self._foreign_audio(streams)
+        )
+        if selected is None and should_use_external and not sidecars:
+            downloaded = SubtitleProvider().fetch_english(session.media_path)
+            if downloaded:
+                sidecars.append(downloaded)
+        if selected is None and not (should_use_external and sidecars):
+            return None
+        temporary = target.with_suffix(".tmp.vtt")
+        if selected:
+            _codec, subtitle_index = selected
+            source_args = ["-ss", f"{session.media_offset:.3f}", "-i", session.media_path]
+            map_args = ["-map", f"0:s:{subtitle_index}"]
+        else:
+            source_args = [
+                "-ss", f"{session.media_offset:.3f}",
+                "-i", str(sidecars[0]),
+            ]
+            map_args = []
+        try:
+            subprocess.run(
+                [
+                    os.environ.get("FS42_FFMPEG", "ffmpeg"),
+                    "-hide_banner", "-loglevel", "error", "-nostdin",
+                    *source_args, *map_args, "-c:s", "webvtt", "-f", "webvtt",
+                    "-y", str(temporary),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            if temporary.is_file() and temporary.stat().st_size:
+                temporary.replace(target)
+                return target
+        except (OSError, subprocess.SubprocessError) as exc:
+            LOG.warning("Could not prepare subtitle track for %s: %s", session.media_path, exc)
+        temporary.unlink(missing_ok=True)
+        return None
+
     def delete(self, session_id: str) -> bool:
         with self.lock:
             session = self.sessions.pop(session_id, None)
@@ -695,7 +763,7 @@ class HLSSessionManager:
                     {
                         "channel": broadcast.key[0],
                         "profile": broadcast.key[1],
-                        "subtitles": broadcast.key[3],
+                        "subtitles": "browser-track",
                         "viewers": len(broadcast.leases),
                         "running": broadcast.process.poll() is None,
                         "segments": sum(
@@ -753,7 +821,7 @@ class HLSSessionManager:
         self._remove_broadcast(victim.key)
         return True
 
-    def _remove_broadcast(self, key: tuple[str, str, str, str] | None) -> None:
+    def _remove_broadcast(self, key: tuple[str, str, str] | None) -> None:
         broadcast = self.broadcasts.pop(key, None)
         if broadcast is None:
             return

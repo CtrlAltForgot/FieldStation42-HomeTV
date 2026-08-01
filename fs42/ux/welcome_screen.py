@@ -14,7 +14,7 @@ class WelcomeScreen(Screen):
     CSS_PATH = "welcome_screen.tcss"
 
     def compose(self) -> ComposeResult:
-        yield Header("Welcome to Station42")
+        yield Header("Welcome to myHomeTV")
         self.md = Markdown("LOADING...")
         yield self.md
         yield Horizontal(
@@ -34,7 +34,7 @@ class WelcomeScreen(Screen):
                 self.app.push_screen(QuitScreen())
 
     def on_mount(self) -> None:
-        self.title = "FieldStation42"
+        self.title = "myHomeTV"
         self.sub_title = "Control Panel"
         self.md.styles.height = "80%"
         self.md.styles.width = "100%"
@@ -45,7 +45,7 @@ class WelcomeScreen(Screen):
 
     def populate_stats(self):
         self.md.update("")
-        text = "# FieldStation42 Summary\n"
+        text = "# myHomeTV Summary\n"
 
         for station in StationManager().stations:
             network_name = station["network_name"]

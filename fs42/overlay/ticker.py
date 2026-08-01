@@ -117,7 +117,7 @@ class TickerWindow(QWidget):
                 'text_shadow': QColor(0, 0, 0, 150)
             },
             'fieldstation': {
-                'header_start': QColor(40, 80, 140, 240),   # FieldStation42 blue
+                'header_start': QColor(40, 80, 140, 240),   # myHomeTV blue
                 'header_end': QColor(20, 50, 90, 240),      # Darker broadcast blue
                 'background': QColor(8, 12, 20, 200),       # Dark blue-black
                 'accent': QColor(120, 180, 255, 100),       # Light blue accent
@@ -127,7 +127,7 @@ class TickerWindow(QWidget):
         
         # Default values
         self.current_style = 'fieldstation'
-        self.header_title = "FS42"
+        self.header_title = "myHomeTV"
         self.logo_pixmap = None
         self.load_fs42_logo()
         
@@ -147,7 +147,7 @@ class TickerWindow(QWidget):
         self.timer.start(50)  
     
     def load_fs42_logo(self):
-        """Load FieldStation42 logo if available"""
+        """Load the myHomeTV logo if available."""
         logo_paths = [
             Path("runtime/toast_logo.png")
         ]
@@ -165,7 +165,7 @@ class TickerWindow(QWidget):
         if self.logo_pixmap is None or self.logo_pixmap.isNull():
             self.logo_pixmap = None
     
-    def show_message(self, text, title="FS42", style="fieldstation", iterations=2):
+    def show_message(self, text, title="myHomeTV", style="fieldstation", iterations=2):
 
         self.message = text
         self.header_title = title
@@ -297,7 +297,7 @@ def signal_handler(sig, frame):
     QApplication.quit()
 
 
-def run_ticker_app(text, title="FS42", style="fieldstation", iterations=2):
+def run_ticker_app(text, title="myHomeTV", style="fieldstation", iterations=2):
     """Run the ticker application with specified parameters"""
     print("Running news ticker window...")
     
@@ -321,7 +321,7 @@ def run_ticker_app(text, title="FS42", style="fieldstation", iterations=2):
     sys.exit(app.exec())
 
 
-def run_ticker(text, title="FS42", style="fieldstation", iterations=2):
+def run_ticker(text, title="myHomeTV", style="fieldstation", iterations=2):
     """Start the ticker in a separate process"""
     def ticker_process():
         run_ticker_app(text, title, style, iterations)
@@ -333,5 +333,5 @@ def run_ticker(text, title="FS42", style="fieldstation", iterations=2):
 
 if __name__ == '__main__':
     # Example usage when run directly
-    run_ticker_app("Welcome to FieldStation42 - Your retro TV experience")
+    run_ticker_app("Welcome to myHomeTV - Your personal TV experience")
     print("Done")

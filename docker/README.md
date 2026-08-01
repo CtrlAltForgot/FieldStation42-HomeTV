@@ -158,6 +158,12 @@ Catalog rebuilds enrich only missing/incomplete entries. The management page's
 **Scan missing metadata** action performs the same incremental scan without
 resetting or regenerating schedules.
 
+TMDB and optional OpenSubtitles keys can also be configured after deployment
+from **myHomeTV → Settings**, so shell editing is not required. Realistic
+weekly premieres, reruns, persistent history, channel promos, and seasonal
+bumper folders are documented in
+[the myHomeTV scheduler guide](../docs/HOMETV_SCHEDULER.md).
+
 From the staging repository on Unraid:
 
 ```bash

@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://fieldstation42.example.com/station-config.schema.json",
-  "title": "FieldStation42 Station Configuration",
-  "description": "Schema for FieldStation42 station configuration files",
+  "$id": "https://myhometv.example.com/station-config.schema.json",
+  "title": "myHomeTV Station Configuration",
+  "description": "Schema for myHomeTV station configuration files",
   "type": "object",
   "required": ["station_conf"],
   "properties": {
@@ -229,6 +229,36 @@
               "enum": ["both", "end", "start"]
             }
           }
+        },
+        "schedule_promos": {
+          "oneOf": [
+            {"type": "boolean"},
+            {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean", "default": true},
+                "intensity": {
+                  "type": "string",
+                  "enum": ["rare", "normal", "frequent"],
+                  "default": "normal"
+                },
+                "duration": {
+                  "type": "integer", "minimum": 4, "maximum": 12,
+                  "default": 6
+                },
+                "minimum_spacing_hours": {
+                  "type": "integer", "minimum": 6, "maximum": 336,
+                  "default": 24
+                },
+                "lead_hours": {
+                  "type": "integer", "minimum": 1, "maximum": 168,
+                  "default": 72
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "description": "Render occasional channel-specific promos from realistic premiere reservations"
         },
         "day_templates": {
           "type": "object",
@@ -635,6 +665,84 @@
           "minimum": 0,
           "maximum": 1,
           "description": "Ending point in sequence (0.0 to 1.0)"
+        },
+        "programming": {
+          "type": "object",
+          "description": "Opt-in broadcast-realistic premiere and rerun policy for an episodic slot",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["premiere", "rerun", "mixed"],
+              "default": "mixed"
+            },
+            "slot_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "description": "Stable identifier used to retain weekly slot history"
+            },
+            "series": {
+              "type": "string",
+              "description": "Optional English series name when a tag contains multiple shows"
+            },
+            "premiere_cadence": {
+              "type": "string",
+              "enum": ["weekly"],
+              "default": "weekly"
+            },
+            "premiere_interval_weeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 52,
+              "default": 1
+            },
+            "cadence_anchor_date": {"type": "string", "format": "date"},
+            "premiere_start_date": {"type": "string", "format": "date"},
+            "premiere_end_date": {"type": "string", "format": "date"},
+            "hiatus_ranges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["start", "end"],
+                "properties": {
+                  "start": {"type": "string", "format": "date"},
+                  "end": {"type": "string", "format": "date"}
+                },
+                "additionalProperties": false
+              }
+            },
+            "catch_up_policy": {
+              "type": "string",
+              "enum": ["advance_available", "wait_for_missing"],
+              "default": "advance_available"
+            },
+            "minimum_rerun_gap_days": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 365,
+              "default": 7
+            },
+            "rerun_recent_seasons": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "library_end_policy": {
+              "type": "string",
+              "enum": ["reruns", "restart_after_hiatus", "hold"],
+              "default": "reruns"
+            },
+            "restart_hiatus_weeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 104,
+              "default": 13
+            },
+            "fallback_tag": {
+              "type": "string"
+            }
+          },
+          "required": ["mode"],
+          "additionalProperties": false
         },
         "random_tags": {
           "type": "boolean",

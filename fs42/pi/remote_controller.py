@@ -368,7 +368,7 @@ def end_pressed():
 
 
 def toggle_services():
-    """Toggle FieldStation42 services on/off - true power button behavior"""
+    """Toggle myHomeTV services on/off - true power button behavior."""
     if not should_allow_press('power_stop'):
         return  # Debounced - ignore this press
 
@@ -678,7 +678,7 @@ def main():
     """Main function to start the input device listener"""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='FieldStation42 Remote Controller',
+        description='myHomeTV Remote Controller',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Device specification examples:
