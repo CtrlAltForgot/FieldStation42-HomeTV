@@ -14,9 +14,36 @@ from fs42.database import connect
 from fs42.media_processor import MediaProcessor
 from fs42.reel_cutter import ReelCutter
 from fs42.liquid_blocks import LiquidBlock
+from fs42.liquid_schedule import LiquidSchedule
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
+    def test_movie_uses_exact_runtime_instead_of_ad_padding(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {"schedule_increment": 30}
+        movie = SimpleNamespace(
+            path="/media/Movies/The Feature (2026).mkv",
+            realpath="/media/Movies/The Feature (2026).mkv",
+            duration=7_500,
+        )
+        with patch("fs42.liquid_schedule.MetadataIO.read", return_value=None):
+            target = schedule._feature_target_duration(movie)
+        self.assertEqual(target, 7_500)
+        self.assertNotEqual(target, schedule._calc_target_duration(7_500))
+
+    def test_movie_metadata_disables_padding_outside_movies_folder(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {"schedule_increment": 30}
+        movie = SimpleNamespace(
+            path="/media/Specials/The Feature.mkv",
+            realpath="/media/Specials/The Feature.mkv",
+            duration=7_500,
+        )
+        with patch(
+            "fs42.liquid_schedule.MetadataIO.read",
+            return_value={"type": "movie"},
+        ):
+            self.assertEqual(schedule._feature_target_duration(movie), 7_500)
     def test_exact_length_commercial_fills_gap_without_dead_air(self):
         catalog = ShowCatalog.__new__(ShowCatalog)
         exact = CatalogEntry("/ads/exact.mkv", 30, "commercials")

@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 # Validate ffmpeg-python package
 try:
@@ -78,6 +79,18 @@ class MediaProcessor:
         "shorts",
         "trailers",
     }
+    MOVIE_LIBRARY_DIRS = {"film", "films", "movie", "movies"}
+
+    @staticmethod
+    def is_movie(file_path: str, metadata: dict | None = None) -> bool:
+        """Identify movie-library features without relying on their duration."""
+        if metadata and metadata.get("type") == "movie":
+            return True
+        return any(
+            re.sub(r"[^a-z]+", "", part.casefold())
+            in MediaProcessor.MOVIE_LIBRARY_DIRS
+            for part in Path(file_path).parts[:-1]
+        )
 
     @staticmethod
     def get_media_type(file_path: str) -> str:

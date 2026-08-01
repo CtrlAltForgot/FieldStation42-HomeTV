@@ -18,6 +18,8 @@ from fs42.marathon_agent import MarathonAgent
 from fs42.path_query import PathQuery
 from fs42.station_manager import StationManager
 from fs42.liquid_io import LiquidIO
+from fs42.media_processor import MediaProcessor
+from fs42.metadata_io import MetadataIO
 
 # logging.basicConfig(format="%(asctime)s %(levelname)s:%(name)s:%(message)s", level=logging.INFO)
 
@@ -43,6 +45,14 @@ class LiquidSchedule:
         if multiple == 0:
             return duration
         return multiple * math.ceil(duration / multiple)
+
+    def _feature_target_duration(self, candidate, increment=None):
+        """Movies run at their real length; episodic TV may use padded slots."""
+        path = candidate.realpath or candidate.path
+        metadata = MetadataIO.read(path)
+        if MediaProcessor.is_movie(path, metadata):
+            return candidate.duration
+        return self._calc_target_duration(candidate.duration, increment)
 
     def _load_blocks(self):
         self._blocks = LiquidAPI.get_blocks(self.conf)
@@ -136,7 +146,7 @@ class LiquidSchedule:
 
             break_info, break_strategy, increment = self._break_info(slot_config, tag_str, candidate.path)
 
-            target_duration = self._calc_target_duration(candidate.duration, increment)
+            target_duration = self._feature_target_duration(candidate, increment)
             next_mark = current_mark + datetime.timedelta(seconds=target_duration)
             new_block = LiquidBlock(candidate, current_mark, next_mark, candidate.title, break_strategy, break_info)
             # add sequence information

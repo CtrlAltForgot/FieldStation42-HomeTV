@@ -160,6 +160,24 @@ class FluidBuilder:
                         )
                         connection.commit()
                         continue
+                    if MediaProcessor.is_movie(entry.realpath):
+                        FluidStatements.add_commercial_break_scan(
+                            connection,
+                            entry.realpath,
+                            self.COMMERCIAL_BREAK_DETECTOR_VERSION,
+                            os.stat(entry.realpath).st_size,
+                            os.stat(entry.realpath).st_mtime_ns,
+                            [],
+                        )
+                        FluidStatements.add_chapter_points(
+                            connection, entry.realpath, []
+                        )
+                        connection.commit()
+                        self._l.info(
+                            "Skipping commercial scan for movie: %s",
+                            entry.realpath,
+                        )
+                        continue
                     stat = os.stat(entry.realpath)
                     cached = FluidStatements.get_commercial_break_scan(
                         connection,
