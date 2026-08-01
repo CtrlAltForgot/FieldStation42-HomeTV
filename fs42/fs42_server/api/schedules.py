@@ -88,6 +88,40 @@ AUXILIARY_TITLES = {
 MINOR_TITLE_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to", "with"}
 
 
+def _schedule_payload(
+    network_name: str,
+    start: str | None = None,
+    end: str | None = None,
+    include_meta: bool = False,
+    include_display: bool = False,
+):
+    """Build one schedule response without putting station names in URL paths."""
+    conf = StationManager().station_by_name(network_name)
+    if conf is None:
+        return {"error": f"Unknown station {network_name}", "schedule_blocks": []}
+    sdt = None
+    edt = None
+    if start and end:
+        try:
+            sdt = datetime.fromisoformat(start)
+            edt = datetime.fromisoformat(end)
+        except ValueError:
+            return {
+                "error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS) for start and end.",
+                "schedule_blocks": [],
+            }
+
+    if conf.get("network_type") == "live_news":
+        sdt = sdt or datetime.now()
+        edt = edt or (sdt + __import__("datetime").timedelta(hours=24))
+        schedule_blocks = live_schedule_blocks(conf, sdt, edt)
+    else:
+        schedule_blocks = LiquidAPI.get_blocks(conf, sdt, edt)
+    if include_meta or include_display:
+        _attach_meta(schedule_blocks, read_meta=include_meta)
+    return {"network_name": network_name, "schedule_blocks": schedule_blocks}
+
+
 def _natural_title_case(title: str) -> str:
     words = title.split()
     return " ".join(
@@ -501,6 +535,21 @@ async def search_schedule(network_name: str, query: str = None):
 
     return {"network_name": network_name, "query": query, "schedule_blocks": schedule_blocks}
 
+
+@router.get("")
+@router.get("/")
+async def get_schedule_by_query(
+    network_name: str,
+    start: str = None,
+    end: str = None,
+    include_meta: bool = False,
+    include_display: bool = False,
+):
+    """Query-safe schedule route for names containing '/', '#', or Unicode."""
+    return _schedule_payload(
+        network_name, start, end, include_meta, include_display
+    )
+
 @router.get("/{network_name}")
 async def get_schedule(
     network_name: str,
@@ -509,22 +558,6 @@ async def get_schedule(
     include_meta: bool = False,
     include_display: bool = False,
 ):
-    conf = StationManager().station_by_name(network_name)
-    sdt = None
-    edt = None
-    if start and end:
-        try:
-            sdt = datetime.fromisoformat(start)
-            edt = datetime.fromisoformat(end)
-        except ValueError:
-            return {"error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS) for start and end."}
-
-    if conf.get("network_type") == "live_news":
-        sdt = sdt or datetime.now()
-        edt = edt or (sdt + __import__("datetime").timedelta(hours=24))
-        schedule_blocks = live_schedule_blocks(conf, sdt, edt)
-    else:
-        schedule_blocks = LiquidAPI.get_blocks(conf, sdt, edt)
-    if include_meta or include_display:
-        _attach_meta(schedule_blocks, read_meta=include_meta)
-    return {"network_name": network_name, "schedule_blocks": schedule_blocks}
+    return _schedule_payload(
+        network_name, start, end, include_meta, include_display
+    )

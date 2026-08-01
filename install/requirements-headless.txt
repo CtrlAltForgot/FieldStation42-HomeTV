@@ -6,3 +6,4 @@ rich
 mutagen
 ffmpeg-python
 moviepy>=2.1.1
+yt-dlp>=2026.7.4

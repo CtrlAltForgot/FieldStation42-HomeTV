@@ -360,3 +360,25 @@ Verify in this order:
   automatically resume an unexpected pause, and request the highest available
   quality. myHomeTV remains the only interactive overlay while preserving any
   publisher branding required by the official player.
+
+## Active television-client release (2026-08-01)
+
+- Provide a compiled and sideloadable Roku SceneGraph client operated entirely
+  by the physical Roku remote. Back must always stop playback and restore the
+  guide; channel Up/Down must tune without requiring a phone.
+- Provide an equivalent LG webOS client with couch-distance layout, native HLS,
+  remote arrows/OK/Back/channel keys, on-TV server settings, and an officially
+  validated IPK package.
+- Give both clients a single device-neutral guide endpoint. Treat station names
+  as query data so names containing slashes (especially CBS News 24/7) cannot
+  disappear due to URL routing.
+- Prefer direct highest-quality HLS resolved from each publisher's public
+  official live broadcast on every client. Never expose an interactive YouTube
+  overlay on Roku or LG; retain the non-interactive browser embed only as an
+  emergency PC fallback.
+- Keep navigation and playback state per client. Different devices may watch
+  different channels concurrently; viewers on the same channel share the
+  underlying broadcaster for efficiency without sharing control state.
+- Validate Roku source with a BrightScript compiler, validate and inspect the
+  LG package using the official webOS CLI, test all current news resolvers, run
+  the full Python regression suite, and serve both installers from myHomeTV.

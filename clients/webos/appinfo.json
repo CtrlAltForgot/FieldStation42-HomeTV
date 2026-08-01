@@ -1,0 +1,15 @@
+{
+  "id": "com.myhometv.client",
+  "version": "0.1.0",
+  "vendor": "myHomeTV",
+  "type": "web",
+  "main": "index.html",
+  "title": "myHomeTV",
+  "icon": "assets/icon.png",
+  "largeIcon": "assets/icon.png",
+  "splashBackground": "assets/splash.png",
+  "transparent": false,
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true
+}
+

@@ -21,7 +21,7 @@ from fs42.metadata_io import MetadataIO
 from fs42.artwork_preloader import status as artwork_preload_status
 from fs42.metadata_enrichment import MetadataEnricher, _episode_identity, artwork_root
 from fs42.live_news import (
-    artwork_svg, discover_live_video, discover_official_hls,
+    artwork_svg, discover_direct_hls, discover_live_video,
     now_payload as live_now_payload,
     station_source,
 )
@@ -45,6 +45,7 @@ class SessionRequest(BaseModel):
     boundary_at: dt.datetime | None = None
     subtitles: str = "auto"
     refresh_live: bool = False
+    client: str = "browser"
 
 
 class ClientEvent(BaseModel):
@@ -234,15 +235,19 @@ async def create_session(body: SessionRequest, request: Request):
             if not item:
                 raise ValueError("This live-news source is not configured safely")
             timestamp = dt.datetime.now()
-            video_id = await asyncio.to_thread(
-                discover_live_video, station, body.refresh_live
+            if body.client not in {"browser", "roku", "webos"}:
+                raise ValueError("Unknown television client")
+            hls_url = await asyncio.to_thread(
+                discover_direct_hls, station, body.refresh_live
             )
-            hls_url = None if video_id else await asyncio.to_thread(
-                discover_official_hls, station
-            )
+            video_id = None
+            if not hls_url and body.client == "browser":
+                video_id = await asyncio.to_thread(
+                    discover_live_video, station, body.refresh_live
+                )
             if not video_id and not hls_url:
                 raise ProgramNotFound(
-                    "The publisher does not currently expose an embeddable live broadcast"
+                    "The publisher does not currently expose a playable live broadcast"
                 )
             if hls_url:
                 return {

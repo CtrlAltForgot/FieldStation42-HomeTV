@@ -20,6 +20,7 @@ CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{20,30}$")
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 DISCOVERY_LOCK = threading.Lock()
 DISCOVERY_CACHE: dict[str, tuple[float, str]] = {}
+HLS_CACHE: dict[str, tuple[float, str]] = {}
 LOG = logging.getLogger("LiveNews")
 
 # These are official publisher-operated YouTube channels.  We intentionally
@@ -144,6 +145,63 @@ def discover_official_hls(station: dict) -> str | None:
     except Exception as exc:
         LOG.warning("Official HLS discovery failed for %s: %s", item.get("id"), exc)
     return None
+
+
+def discover_youtube_hls(station: dict, force: bool = False) -> str | None:
+    """Resolve an official public YouTube live broadcast to direct HLS.
+
+    TV platforms cannot embed YouTube's interactive web player. yt-dlp is used
+    only as a URL resolver; myHomeTV does not record or redistribute the feed.
+    Resolved URLs are short-lived and cached for just five minutes.
+    """
+    item = station_source(station)
+    if not item:
+        return None
+    source_id = item["id"]
+    cached = HLS_CACHE.get(source_id)
+    if cached and not force and time.monotonic() - cached[0] < 300:
+        return cached[1]
+    try:
+        from yt_dlp import YoutubeDL
+
+        with YoutubeDL({
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "skip_download": True,
+            "format": "best[protocol*=m3u8]/best",
+        }) as resolver:
+            info = resolver.extract_info(
+                f"https://www.youtube.com/channel/{item['youtube_channel_id']}/live",
+                download=False,
+            )
+        candidates = [
+            fmt for fmt in (info or {}).get("formats", [])
+            if str(fmt.get("protocol", "")).startswith("m3u8")
+            and str(fmt.get("url", "")).startswith("https://")
+        ]
+        if candidates:
+            chosen = max(
+                candidates,
+                key=lambda fmt: (
+                    int(fmt.get("height") or 0),
+                    float(fmt.get("tbr") or 0),
+                ),
+            )["url"]
+        else:
+            chosen = str((info or {}).get("url", ""))
+            if not chosen.startswith("https://") or "m3u8" not in chosen:
+                return None
+        HLS_CACHE[source_id] = (time.monotonic(), chosen)
+        return chosen
+    except Exception as exc:
+        LOG.warning("Direct live playback discovery failed for %s: %s", source_id, exc)
+        return None
+
+
+def discover_direct_hls(station: dict, force: bool = False) -> str | None:
+    """Prefer a publisher HLS feed, then its official public live broadcast."""
+    return discover_official_hls(station) or discover_youtube_hls(station, force)
 
 
 def station_config(item: dict, channel: int) -> dict:

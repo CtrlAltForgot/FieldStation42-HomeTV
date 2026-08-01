@@ -6,17 +6,25 @@ from unittest.mock import MagicMock, patch
 
 from fs42.hometv import ScheduleResolver
 from fs42.live_news import (
-    DISCOVERY_CACHE, SOURCES, artwork_svg, discover_live_video,
-    discover_official_hls, now_payload, schedule_blocks, station_config,
+    DISCOVERY_CACHE, HLS_CACHE, SOURCES, artwork_svg, discover_live_video,
+    discover_official_hls, discover_youtube_hls, now_payload, schedule_blocks, station_config,
     station_source,
 )
 from fs42.fs42_server.api.live_news import InstallRequest, install
+from fs42.fs42_server.api.schedules import get_schedule_by_query
+from fs42.fs42_server.api.tv import guide as tv_guide
 from fs42.fs42_server.api.watch import SessionRequest, create_session
 
 
 class FakeStationManager:
     def __init__(self, stations=None):
         self.stations = stations or []
+
+    def station_by_name(self, name):
+        return next(
+            (station for station in self.stations if station.get("network_name") == name),
+            None,
+        )
 
 
 class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
@@ -56,6 +64,9 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "fs42.fs42_server.api.watch.discover_live_video",
             return_value="ZvdiJUYGBis",
+        ), patch(
+            "fs42.fs42_server.api.watch.discover_direct_hls",
+            return_value=None,
         ):
             result = await create_session(SessionRequest(channel="20"), request)
         self.assertEqual(result["playback_kind"], "embed")
@@ -68,9 +79,8 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         manager = SimpleNamespace(resolver=resolver)
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hls_sessions=manager)))
         with (
-            patch("fs42.fs42_server.api.watch.discover_live_video", return_value=None),
             patch(
-                "fs42.fs42_server.api.watch.discover_official_hls",
+                "fs42.fs42_server.api.watch.discover_direct_hls",
                 return_value="https://news.example.cbsivideo.com/index.m3u8",
             ),
         ):
@@ -78,6 +88,19 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["playback_kind"], "external_hls")
         self.assertIsNone(result["session_id"])
         self.assertTrue(result["playlist_url"].endswith("index.m3u8"))
+
+    async def test_roku_live_news_requires_native_hls_never_embed(self):
+        station = self.station(SOURCES[0], 20)
+        resolver = ScheduleResolver(FakeStationManager([station]))
+        manager = SimpleNamespace(resolver=resolver)
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hls_sessions=manager)))
+        with (
+            patch("fs42.fs42_server.api.watch.discover_direct_hls", return_value=None),
+            patch("fs42.fs42_server.api.watch.discover_live_video") as embed,
+        ):
+            with self.assertRaises(Exception):
+                await create_session(SessionRequest(channel="20", client="roku"), request)
+        embed.assert_not_called()
 
     def test_discovers_concrete_video_from_official_live_command(self):
         station = self.station(SOURCES[-1], 23)
@@ -107,6 +130,46 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
                 discover_official_hls(station),
                 "https://news.example.cbsivideo.com/index.m3u8",
             )
+
+    def test_direct_youtube_resolver_selects_highest_hls_quality(self):
+        station = self.station(SOURCES[0], 20)
+        resolver = MagicMock()
+        resolver.__enter__.return_value.extract_info.return_value = {
+            "formats": [
+                {"protocol": "m3u8_native", "height": 720, "tbr": 1200, "url": "https://video.example/720.m3u8"},
+                {"protocol": "m3u8_native", "height": 1080, "tbr": 2400, "url": "https://video.example/1080.m3u8"},
+            ]
+        }
+        HLS_CACHE.clear()
+        with patch("yt_dlp.YoutubeDL", return_value=resolver):
+            self.assertEqual(
+                discover_youtube_hls(station),
+                "https://video.example/1080.m3u8",
+            )
+
+    async def test_cbs_slash_name_works_through_query_schedule_route(self):
+        station = self.station(SOURCES[1], 21)
+        with patch(
+            "fs42.fs42_server.api.schedules.StationManager"
+        ) as manager:
+            manager.return_value.station_by_name.return_value = station
+            result = await get_schedule_by_query(
+                "CBS News 24/7",
+                "2026-08-01T10:00:00",
+                "2026-08-01T14:00:00",
+            )
+        self.assertEqual(result["network_name"], "CBS News 24/7")
+        self.assertEqual(result["schedule_blocks"][0]["title"], "CBS News 24/7")
+
+    async def test_tv_guide_includes_live_station_without_database_schedule(self):
+        station = self.station(SOURCES[1], 21)
+        manager = FakeStationManager([station])
+        with patch("fs42.fs42_server.api.tv.StationManager", return_value=manager), patch(
+            "fs42.fs42_server.api.schedules.StationManager", return_value=manager
+        ):
+            result = await tv_guide(6)
+        self.assertEqual(result["channels"][0]["channel_name"], "CBS News 24/7")
+        self.assertEqual(result["channels"][0]["programs"][0]["airing_kind"], "live")
 
     async def test_installer_is_collision_safe_and_idempotent(self):
         ordinary = {"network_name": "Existing", "channel_number": 20, "network_type": "standard"}
@@ -206,6 +269,37 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("pointer-events: none", watch_css)
         self.assertIn('event.key === "Escape"', watch_js)
         self.assertIn("setGuideVisible(guide.hidden)", watch_js)
+
+    def test_tv_clients_are_remote_only_and_back_always_restores_guide(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        webos = open("clients/webos/app.js", encoding="utf-8").read()
+        self.assertIn('if key = "back"', roku)
+        self.assertIn("stopPlayback()", roku)
+        self.assertIn('state = "finished"', roku)
+        self.assertIn('client: "roku"', roku)
+        self.assertIn("key === 461", webos)
+        self.assertIn('client:"webos"', webos)
+        self.assertIn("changeChannel", webos)
+        self.assertIn('addEventListener("ended"', webos)
+
+    def test_tv_client_packages_have_required_manifests(self):
+        manifest = open("clients/roku/manifest", encoding="utf-8").read()
+        appinfo = json.load(open("clients/webos/appinfo.json", encoding="utf-8"))
+        self.assertIn("title=myHomeTV", manifest)
+        self.assertEqual(appinfo["id"], "com.myhometv.client")
+        self.assertTrue(__import__("pathlib").Path(
+            "clients/releases/myhometv-roku.zip"
+        ).is_file())
+        self.assertTrue(__import__("pathlib").Path(
+            "clients/releases/myhometv-webos.ipk"
+        ).is_file())
+
+    def test_schedule_names_are_query_parameters_not_path_segments(self):
+        common = open(
+            "fs42/fs42_server/static/common.js", encoding="utf-8"
+        ).read()
+        self.assertIn("network_name=${encodeURIComponent(networkId)}", common)
+        self.assertNotIn("`schedules/${networkId}`", common)
 
 
 if __name__ == "__main__":

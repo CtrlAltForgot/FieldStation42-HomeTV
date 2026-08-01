@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: http: https:; connect-src *; media-src * blob:; img-src * data: blob:; style-src 'self'; script-src 'self'">
+  <meta name="viewport" content="width=1920,height=1080,initial-scale=1,user-scalable=no">
+  <title>myHomeTV</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main id="guide">
+    <header>
+      <img id="artwork" alt="">
+      <section>
+        <p class="brand">myHomeTV</p>
+        <h1 id="title">Connecting to your television server…</h1>
+        <p id="details"></p>
+        <p id="description"></p>
+        <p id="status"></p>
+      </section>
+      <time id="clock"></time>
+    </header>
+    <section class="grid">
+      <div><h2>CHANNELS</h2><div id="channels" class="list"></div></div>
+      <div><h2>ON NOW / COMING UP</h2><div id="programs" class="list"></div></div>
+    </section>
+    <footer>Arrows Browse&nbsp;&nbsp;&nbsp; OK Watch&nbsp;&nbsp;&nbsp; Back Guide&nbsp;&nbsp;&nbsp; CH +/- Change channel&nbsp;&nbsp;&nbsp; Green Settings</footer>
+  </main>
+  <section id="player" hidden>
+    <video id="video" autoplay></video>
+    <div id="hud"><strong id="hud-title">myHomeTV</strong><span>Back: Guide&nbsp;&nbsp;&nbsp; CH +/-: Change channel</span></div>
+  </section>
+  <div id="settings" hidden>
+    <form><h2>myHomeTV server</h2><input id="server" type="url" spellcheck="false"><button>Save</button><p>Example: http://192.168.1.254:4243</p></form>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
+

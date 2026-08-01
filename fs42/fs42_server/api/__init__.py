@@ -11,6 +11,7 @@ from .media import router as media_router
 from .watch import router as watch_router
 from .settings import router as settings_router
 from .live_news import router as live_news_router
+from .tv import router as tv_router
 
 # Create a list of all routers to be included
 routers = [
@@ -26,4 +27,5 @@ routers = [
     watch_router,
     settings_router,
     live_news_router,
+    tv_router,
 ]

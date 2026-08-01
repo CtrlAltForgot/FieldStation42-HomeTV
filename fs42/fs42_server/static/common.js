@@ -185,8 +185,8 @@ async function fetchScheduleSummary(networkId) {
 // Fetch schedule blocks for a station and date range
 async function fetchSchedule(networkId, start, end, includeMeta, includeDisplay) {
     try {
-        let url = `schedules/${networkId}`;
-        const params = [];
+        let url = 'schedules';
+        const params = [`network_name=${encodeURIComponent(networkId)}`];
         if (start) params.push(`start=${encodeURIComponent(start)}`);
         if (end) params.push(`end=${encodeURIComponent(end)}`);
         if (includeMeta) params.push('include_meta=true');

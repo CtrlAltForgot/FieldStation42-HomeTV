@@ -18,6 +18,9 @@ myHomeTV is built from the open-source [FieldStation42](https://github.com/shane
 - **Runs anywhere** — Raspberry Pi, any Linux machine, or Windows via WSL
 - **myHomeTV server mode** — run headlessly on Unraid/Docker and watch the
   shared channel timeline from browsers at `/watch`
+- **Television clients** — native remote-only Roku SceneGraph and LG webOS
+  clients, with independent viewing sessions and direct downloads from the
+  server
 
 ## Headless myHomeTV
 
@@ -41,7 +44,8 @@ The management console remains at `/`, and local installations can continue
 using `field_player.py` and MPV unchanged. See
 [myHomeTV architecture](docs/HOMETV_ARCHITECTURE.md),
 [Docker/Unraid setup](docker/README.md), and
-[Raspberry Pi kiosk setup](docs/RASPBERRY_PI_KIOSK.md).
+[Raspberry Pi kiosk setup](docs/RASPBERRY_PI_KIOSK.md). Roku and LG client
+source, controls, and sideload notes are in [clients/README.md](clients/README.md).
 
 After upgrading an existing myHomeTV deployment, use **Rebuild catalog
 and generate one week** (or rebuild, then explicitly reset and regenerate the
@@ -98,4 +102,3 @@ If you're getting value from FieldStation42, consider supporting it on [Patreon]
 ## Contributing
 
 Bug reports, feature requests, and pull requests are welcome. Please open an issue before submitting large changes.
-

@@ -7,18 +7,21 @@ FOX. Select the publishers you want under **Free Live News**, then choose
 number is skipped automatically. Running the installer again updates the
 managed station in place and preserves its assigned number.
 
-These stations use each publisher's official YouTube live embed. myHomeTV does
-not discover, download, proxy, or restream a hidden video URL, and no paid API
-key or subscription is required. Publisher availability, regional limits,
-advertisements, embedding permission, and programming remain outside
-myHomeTV's control. If a publisher temporarily has no embeddable live event,
-the TV player keeps a branded standby surface available for a later retry.
+These stations resolve direct HLS from each publisher's public official live
+broadcast. myHomeTV does not record or redistribute the feed, and no paid API
+key or subscription is required. The short-lived address is handed directly
+to the viewer's native video player, eliminating the YouTube overlay and
+keeping Roku, webOS, and browser controls inside myHomeTV. Publisher
+availability, regional limits, advertisements, and programming remain outside
+myHomeTV's control. The browser retains a non-interactive official embed only
+as a last-resort fallback; television clients never use it.
 
 Live-news stations appear alongside normal channels in the full guide and
 watch-page channel selector. Their guide artwork is generated and cached by
 the browser immediately, while selecting the current block opens the official
-player. They do not create a media catalog, SQLite schedule, HLS transcode, or
-local recording.
+feed. They do not create a media catalog, SQLite schedule, HLS transcode, or
+local recording. CBS News 24/7 uses the query-safe schedule API because the
+slash in its name is channel data, not a URL path separator.
 
 Only source IDs compiled into `fs42/live_news.py` can be installed through the
 one-click endpoint. Channel IDs are validated and the server constructs the
