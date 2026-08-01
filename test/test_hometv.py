@@ -8,7 +8,7 @@ import unittest
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException
 
@@ -22,6 +22,7 @@ from fs42.hometv import (
 )
 from fs42.media_processor import MediaProcessor
 from fs42.metadata_enrichment import MetadataEnricher
+from fs42.tvmaze_helper import TVmazeHelper
 from fs42.broadcast_scheduler import BroadcastScheduler
 from fs42.schedule_promos import SchedulePromoAgent
 from fs42.subtitle_provider import SubtitleProvider, opensubtitles_hash
@@ -1501,6 +1502,9 @@ class MetadataEnrichmentTests(unittest.TestCase):
             def is_configured(self):
                 return False
 
+            def search_tv(self, _title):
+                return None
+
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "meta.db")
             media_path = os.path.realpath(Path(temp_dir) / "Show S01E01.mkv")
@@ -1514,7 +1518,10 @@ class MetadataEnrichmentTests(unittest.TestCase):
                     "VALUES (?, '{}', 'video')",
                     (media_path,),
                 )
-            enricher = MetadataEnricher(helper=Helper(), db_path=db_path)
+            helper = Helper()
+            enricher = MetadataEnricher(
+                helper=helper, fallback_helper=helper, db_path=db_path
+            )
             enricher.art_dir = Path(temp_dir) / "art"
             artwork_name = "a" * 64 + ".jpg"
             with patch.object(
@@ -1623,6 +1630,51 @@ class MetadataEnrichmentTests(unittest.TestCase):
             self.assertEqual(metadata["season"], 1)
             self.assertEqual(metadata["episode"], 1)
             self.assertEqual(helper.episode_request, (1429, 1, 1))
+
+    def test_tvmaze_fills_the_blacklist_when_tmdb_misses(self):
+        class Primary:
+            def is_configured(self): return True
+            def search_tv(self, _title): return None
+
+        class Fallback:
+            def search_tv(self, title):
+                self.query = title
+                return {
+                    "tvmaze_id": 69, "name": "The Blacklist",
+                    "original_name": "The Blacklist",
+                    "overview": "A wanted fugitive offers to help the FBI.",
+                    "first_air_date": "2013-09-23", "genre": ["Drama"],
+                    "poster_url": None, "backdrop_url": None,
+                    "metadata_source": "tvmaze",
+                }
+            def get_tv_episode(self, show_id, season, episode):
+                self.episode_request = (show_id, season, episode)
+                return {"name": "Pilot", "overview": "Red surrenders.", "air_date": "2013-09-23"}
+
+        fallback = Fallback()
+        enricher = MetadataEnricher(
+            helper=Primary(), fallback_helper=fallback, db_path=":memory:"
+        )
+        result = enricher._enrich(
+            "/media/The Blacklist/Season 01/The Blacklist S01E01.mkv", {}
+        )
+        self.assertEqual(result["show_title"], "The Blacklist")
+        self.assertEqual(result["title"], "Pilot")
+        self.assertEqual(result["metadata_source"], "tvmaze")
+        self.assertEqual(fallback.episode_request, (69, 1, 1))
+
+    def test_tvmaze_adapter_prefers_exact_the_blacklist_match(self):
+        response = MagicMock()
+        response.json.return_value = [
+            {"score": .9, "show": {"id": 1, "name": "Blacklist", "genres": [], "image": None}},
+            {"score": .8, "show": {"id": 69, "name": "The Blacklist", "genres": ["Drama"], "image": {"original": "https://img.test/blacklist.jpg"}}},
+        ]
+        session = MagicMock()
+        session.headers = {}
+        session.get.return_value = response
+        result = TVmazeHelper(session=session).search_tv("The Blacklist")
+        self.assertEqual(result["tvmaze_id"], 69)
+        self.assertEqual(result["backdrop_url"], "https://img.test/blacklist.jpg")
 
 
 class WatchAPITests(unittest.TestCase):

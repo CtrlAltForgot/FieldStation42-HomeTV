@@ -157,6 +157,9 @@ TMDB_API_KEY=your_key_here
 Catalog rebuilds enrich only missing/incomplete entries. The management page's
 **Scan missing metadata** action performs the same incremental scan without
 resetting or regenerating schedules.
+TV series that TMDB cannot match automatically fall back to the key-free
+TVmaze API for English titles, descriptions, episode details, and artwork.
+Movies continue to use TMDB plus their cached local still.
 
 TMDB and optional OpenSubtitles keys can also be configured after deployment
 from **myHomeTV → Settings**, so shell editing is not required. Realistic

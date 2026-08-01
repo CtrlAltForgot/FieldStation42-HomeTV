@@ -81,12 +81,16 @@ def _movie_query(path: str, existing: dict) -> str:
 class MetadataEnricher:
     """Fill missing video metadata without re-querying completed entries."""
 
-    def __init__(self, helper=None, db_path: str | None = None):
+    def __init__(self, helper=None, db_path: str | None = None, fallback_helper=None):
         if helper is None:
             from fs42.fs42_server.api.tmdb_helper import get_tmdb_helper
 
             helper = get_tmdb_helper()
         self.helper = helper
+        if fallback_helper is None:
+            from fs42.tvmaze_helper import TVmazeHelper
+            fallback_helper = TVmazeHelper()
+        self.fallback_helper = fallback_helper
         if db_path is None:
             from fs42.station_manager import StationManager
 
@@ -106,8 +110,8 @@ class MetadataEnricher:
         tmdb_configured = self.helper.is_configured()
         if not tmdb_configured:
             report(
-                "TMDB is not configured; caching local video stills without "
-                "online descriptions."
+                "TMDB is not configured; using key-free TVmaze fallback for "
+                "series and local video stills for movies."
             )
             stats["unconfigured"] = True
         self.art_dir.mkdir(parents=True, exist_ok=True)
@@ -139,11 +143,7 @@ class MetadataEnricher:
                     stats["skipped"] += 1
                     continue
                 try:
-                    enriched = (
-                        self._enrich(path, existing)
-                        if tmdb_configured
-                        else dict(existing)
-                    )
+                    enriched = self._enrich(path, existing)
                     enriched = enriched or dict(existing)
                     if not art_exists and not enriched.get("artwork_file"):
                         identity = _episode_identity(path, enriched)
@@ -207,7 +207,14 @@ class MetadataEnricher:
                 if SEASON_DIR_RE.match(parent.name):
                     parent = parent.parent
                 series = TitleParser.parse_title(parent.name)
-            result = self.helper.search_tv(series)
+            provider = self.helper
+            result = (
+                self.helper.search_tv(series)
+                if self.helper.is_configured() else None
+            )
+            if not result:
+                provider = self.fallback_helper
+                result = provider.search_tv(series)
             if not result:
                 return None
             remote = {
@@ -221,12 +228,14 @@ class MetadataEnricher:
                 "plot": result.get("overview"),
                 "genre": result.get("genre") or [],
                 "tmdb_id": result.get("tmdb_id"),
-                "metadata_source": "tmdb",
+                "tvmaze_id": result.get("tvmaze_id"),
+                "metadata_source": result.get("metadata_source", "tmdb"),
             }
             episode = None
             if identity.get("season") is not None and identity.get("episode") is not None:
-                episode = self.helper.get_tv_episode(
-                    result["tmdb_id"], int(identity["season"]), int(identity["episode"])
+                provider_id = result.get("tmdb_id") or result.get("tvmaze_id")
+                episode = provider.get_tv_episode(
+                    provider_id, int(identity["season"]), int(identity["episode"])
                 )
             if episode:
                 remote.update(
