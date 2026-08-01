@@ -17,8 +17,6 @@
     <Label translation="[55,350]" width="260" text="CHANNEL" color="#62D5FF" font="font:SmallBoldSystemFont" />
     <Group id="timeline" translation="[325,350]" />
     <Group id="guideGrid" translation="[55,390]" />
-    <LabelList id="channels" visible="false" />
-    <LabelList id="programs" visible="false" />
     <Label id="help" translation="[60,1018]" width="1800" text="Arrows  Browse     OK  Watch     Back  Guide     CH +/-  Change channel     *  Captions" color="#7F92A3" font="font:SmallSystemFont" />
     <Label id="status" translation="[530,285]" width="1300" color="#62D5FF" font="font:SmallSystemFont" />
     <Video id="video" width="1920" height="1080" visible="false" enableUI="false" />

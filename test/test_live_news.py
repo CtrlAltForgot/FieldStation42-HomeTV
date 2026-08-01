@@ -13,7 +13,7 @@ from fs42.live_news import (
 from fs42.fs42_server.api.live_news import InstallRequest, install
 from fs42.fs42_server.api.schedules import get_schedule_by_query
 from fs42.fs42_server.api.tv import guide as tv_guide
-from fs42.fs42_server.api.watch import SessionRequest, create_session
+from fs42.fs42_server.api.watch import SessionRequest, create_session, prewarm
 
 
 class FakeStationManager:
@@ -72,6 +72,22 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["playback_kind"], "embed")
         self.assertIsNone(result["session_id"])
         self.assertIn("ZvdiJUYGBis", result["embed_url"])
+
+    async def test_live_news_prewarm_populates_direct_stream_cache(self):
+        station = self.station()
+        manager = SimpleNamespace(
+            resolver=ScheduleResolver(FakeStationManager([station]))
+        )
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(hls_sessions=manager))
+        )
+        with patch(
+            "fs42.fs42_server.api.watch.discover_direct_hls",
+            return_value="https://news.test/live.m3u8",
+        ) as discover:
+            result = await prewarm("20", request)
+        self.assertTrue(result["prewarmed"])
+        discover.assert_called_once_with(station, False)
 
     async def test_session_uses_official_hls_when_youtube_is_not_live(self):
         station = self.station(SOURCES[1], 21)
@@ -322,6 +338,19 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn('client:"webos"', webos)
         self.assertIn("changeChannel", webos)
         self.assertIn('addEventListener("ended"', webos)
+
+    def test_roku_guide_has_one_focus_authority_and_clears_tune_status(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
+        self.assertNotIn('ObserveField("itemFocused"', roku)
+        self.assertNotIn("<LabelList", scene)
+        self.assertIn("refreshGuideSelection()", roku)
+        self.assertIn('/prewarm"', roku)
+        self.assertIn("cancelPendingTune()", roku)
+        self.assertIn("if not m.isTuning then return", roku)
+        self.assertGreaterEqual(
+            roku.count('FindNode("status").text = ""'), 3
+        )
 
     def test_tv_client_packages_have_required_manifests(self):
         manifest = open("clients/roku/manifest", encoding="utf-8").read()

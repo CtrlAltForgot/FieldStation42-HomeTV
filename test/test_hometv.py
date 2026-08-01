@@ -37,6 +37,7 @@ from fs42.fs42_server.api.watch import (
     artwork as artwork_endpoint,
     channels as channel_endpoint,
     create_session as create_session_endpoint,
+    prewarm as prewarm_endpoint,
 )
 from fs42.fs42_server.api import build as build_api
 from fs42.fs42_server.api import settings as settings_api
@@ -2007,6 +2008,25 @@ class WatchAPITests(unittest.TestCase):
     def test_channel_list_does_not_expose_paths(self):
         response = asyncio.run(channel_endpoint(self.request))
         self.assertNotIn("path", str(response))
+
+    def test_channel_prewarm_releases_lease_but_keeps_broadcast_available(self):
+        session = SimpleNamespace(session_id="warm-session")
+        manager = SimpleNamespace(
+            resolver=SimpleNamespace(
+                station=lambda _channel: {"network_type": "scheduled"}
+            ),
+            create=MagicMock(return_value=(session, SimpleNamespace())),
+            delete=MagicMock(return_value=True),
+        )
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(hls_sessions=manager))
+        )
+        result = asyncio.run(prewarm_endpoint("42", request))
+        self.assertTrue(result["prewarmed"])
+        manager.create.assert_called_once_with(
+            "42", "auto", subtitle_mode="auto"
+        )
+        manager.delete.assert_called_once_with("warm-session")
 
     def test_artwork_endpoint_serves_only_preindexed_local_art(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -2,13 +2,7 @@ sub init()
     m.server = "http://192.168.1.254:4243"
     registry = CreateObject("roRegistrySection", "myHomeTV")
     if registry.Exists("server") then m.server = registry.Read("server")
-    m.channels = m.top.FindNode("channels")
-    m.programs = m.top.FindNode("programs")
     m.video = m.top.FindNode("video")
-    m.channels.ObserveField("itemFocused", "onChannelFocused")
-    m.channels.ObserveField("itemSelected", "onChannelSelected")
-    m.programs.ObserveField("itemFocused", "onProgramFocused")
-    m.programs.ObserveField("itemSelected", "onProgramSelected")
     m.video.ObserveField("state", "onVideoState")
     m.rows = []
     m.currentChannel = 0
@@ -20,6 +14,11 @@ sub init()
     m.guideLoadedSeconds = 0
     m.sessionId = ""
     m.inPlayer = false
+    m.isTuning = false
+    m.prewarmTimer = CreateObject("roSGNode", "Timer")
+    m.prewarmTimer.duration = 0.35
+    m.prewarmTimer.repeat = false
+    m.prewarmTimer.ObserveField("fire", "prewarmFocusedChannel")
     loadGuide()
     m.clockTimer = CreateObject("roSGNode", "Timer")
     m.clockTimer.duration = 1
@@ -52,45 +51,39 @@ sub onGuideLoaded(event)
     if data.timeline <> invalid then m.timeline = data.timeline
     if data.roku_track_width <> invalid then m.trackWidth = data.roku_track_width
     m.guideLoadedSeconds = CreateObject("roDateTime").AsSeconds()
-    root = CreateObject("roSGNode", "ContentNode")
-    for each row in m.rows
-        item = root.CreateChild("ContentNode")
-        item.title = row.channel_number + "   " + row.channel_name
-    end for
-    m.channels.content = root
     m.top.FindNode("status").text = ""
     m.top.SetFocus(true)
-    onChannelFocused(invalid)
+    refreshGuideSelection()
     renderTimeline()
-    renderGuideGrid()
 end sub
 
-sub onChannelFocused(event)
-    index = m.currentChannel
-    if event <> invalid then index = m.channels.itemFocused
-    if index < 0 or index >= m.rows.Count() then return
-    m.currentChannel = index
-    row = m.rows[index]
-    root = CreateObject("roSGNode", "ContentNode")
-    if row.programs <> invalid
-        for each program in row.programs
-            item = root.CreateChild("ContentNode")
-            title = program.display_title
-            if title = invalid or title = "" then title = program.title
-            details = program.program_details
-            if details = invalid then details = ""
-            item.title = title + "    " + details
-        end for
+sub refreshGuideSelection()
+    if m.currentChannel < 0 or m.currentChannel >= m.rows.Count() then return
+    programs = m.rows[m.currentChannel].programs
+    if programs = invalid or programs.Count() = 0
+        m.currentProgram = 0
+    else if m.currentProgram < 0 or m.currentProgram >= programs.Count()
+        m.currentProgram = 0
     end if
-    m.programs.content = root
-    m.programs.jumpToItem = 0
-    m.currentProgram = 0
-    showProgram(0)
+    showProgram(m.currentProgram)
+    renderGuideGrid()
+    scheduleFocusedChannelPrewarm()
 end sub
 
-sub onProgramFocused(event)
-    m.currentProgram = m.programs.itemFocused
-    showProgram(m.programs.itemFocused)
+sub scheduleFocusedChannelPrewarm()
+    if m.rows.Count() = 0 then return
+    m.prewarmTimer.control = "stop"
+    m.prewarmTimer.control = "start"
+end sub
+
+sub prewarmFocusedChannel()
+    if m.rows.Count() = 0 or m.inPlayer then return
+    row = m.rows[m.currentChannel]
+    m.prewarmTask = CreateObject("roSGNode", "RequestTask")
+    m.prewarmTask.url = m.server + "/api/watch/channels/" + row.channel_number + "/prewarm"
+    m.prewarmTask.method = "POST"
+    m.prewarmTask.body = "{}"
+    m.prewarmTask.control = "run"
 end sub
 
 function closestProgramIndex(rowIndex as Integer, targetPixel as Integer) as Integer
@@ -285,18 +278,11 @@ sub showProgram(index as Integer)
     if art <> invalid and art <> "" then m.top.FindNode("artwork").uri = m.server + art
 end sub
 
-sub onChannelSelected(event)
-    tuneCurrentChannel()
-end sub
-
-sub onProgramSelected(event)
-    tuneCurrentChannel()
-end sub
-
 sub tuneCurrentChannel()
     if m.rows.Count() = 0 then return
     stopPlayback()
     row = m.rows[m.currentChannel]
+    m.isTuning = true
     m.top.FindNode("status").text = "Tuning channel " + row.channel_number + "…"
     m.playTask = CreateObject("roSGNode", "RequestTask")
     m.playTask.url = m.server + "/api/watch/sessions"
@@ -308,6 +294,8 @@ sub tuneCurrentChannel()
 end sub
 
 sub onPlaybackReady(event)
+    if not m.isTuning then return
+    m.isTuning = false
     result = event.GetData()
     if result = invalid then return
     url = result.playlist_url
@@ -324,6 +312,7 @@ sub onPlaybackReady(event)
     m.sessionId = ""
     if result.session_id <> invalid then m.sessionId = result.session_id
     m.video.content = content
+    m.top.FindNode("status").text = ""
     m.video.visible = true
     m.top.FindNode("playerHud").visible = true
     m.inPlayer = true
@@ -331,12 +320,21 @@ sub onPlaybackReady(event)
     m.video.control = "play"
 end sub
 
+sub cancelPendingTune()
+    if not m.isTuning then return
+    m.isTuning = false
+    if m.playTask <> invalid then m.playTask.control = "stop"
+    m.top.FindNode("status").text = ""
+end sub
+
 sub stopPlayback()
+    cancelPendingTune()
     if m.video <> invalid
         m.video.control = "stop"
         m.video.visible = false
     end if
     m.top.FindNode("playerHud").visible = false
+    m.top.FindNode("status").text = ""
     m.inPlayer = false
     if m.sessionId <> ""
         cleanup = CreateObject("roSGNode", "RequestTask")
@@ -358,6 +356,7 @@ sub onVideoState(event)
 end sub
 
 sub onRequestError(event)
+    m.isTuning = false
     message = event.GetData()
     m.top.FindNode("status").text = message
     if m.inPlayer then m.top.FindNode("playerHud").visible = true
@@ -391,7 +390,7 @@ sub changeChannel(delta as Integer)
     if nextIndex < 0 then nextIndex = m.rows.Count() - 1
     if nextIndex >= m.rows.Count() then nextIndex = 0
     m.currentChannel = nextIndex
-    m.channels.jumpToItem = nextIndex
+    m.currentProgram = 0
     tuneCurrentChannel()
 end sub
 
@@ -400,7 +399,7 @@ sub onLaunchChannel()
     for index = 0 to m.rows.Count() - 1
         if m.rows[index].channel_number = m.top.launchChannel
             m.currentChannel = index
-            m.channels.jumpToItem = index
+            m.currentProgram = 0
             tuneCurrentChannel()
             return
         end if
@@ -412,7 +411,8 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if m.inPlayer
         if key = "back"
             stopPlayback()
-            m.channels.SetFocus(true)
+            m.top.SetFocus(true)
+            refreshGuideSelection()
             return true
         else if key = "channelup" or key = "up"
             changeChannel(1)
@@ -431,6 +431,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if key = "options" then showServerDialog()
         return true
     end if
+    if m.isTuning and key <> "OK" then cancelPendingTune()
     if key = "up"
         targetPixel = m.windowOffsetPixels
         currentPrograms = m.rows[m.currentChannel].programs
@@ -439,10 +440,8 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
         m.currentChannel = m.currentChannel - 1
         if m.currentChannel < 0 then m.currentChannel = 0
-        onChannelFocused(invalid)
         m.currentProgram = closestProgramIndex(m.currentChannel, targetPixel)
-        showProgram(m.currentProgram)
-        renderGuideGrid()
+        refreshGuideSelection()
         return true
     else if key = "down"
         targetPixel = m.windowOffsetPixels
@@ -452,10 +451,8 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
         m.currentChannel = m.currentChannel + 1
         if m.currentChannel >= m.rows.Count() then m.currentChannel = m.rows.Count() - 1
-        onChannelFocused(invalid)
         m.currentProgram = closestProgramIndex(m.currentChannel, targetPixel)
-        showProgram(m.currentProgram)
-        renderGuideGrid()
+        refreshGuideSelection()
         return true
     else if key = "right"
         m.autoFollowNow = false

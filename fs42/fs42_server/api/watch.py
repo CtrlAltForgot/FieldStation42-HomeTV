@@ -121,6 +121,30 @@ async def now(channel: str, request: Request):
         raise _watch_error(exc)
 
 
+@router.post("/channels/{channel}/prewarm", status_code=202)
+async def prewarm(channel: str, request: Request):
+    """Start an unleased channel broadcast while the viewer browses the guide."""
+    manager = _manager(request)
+    try:
+        station = manager.resolver.station(channel)
+        if station.get("network_type") == "live_news":
+            hls_url = await asyncio.to_thread(
+                discover_direct_hls, station, False
+            )
+            return {
+                "channel": channel,
+                "prewarmed": bool(hls_url),
+                "reason": "external_live",
+            }
+        session, _airing = await asyncio.to_thread(
+            manager.create, channel, "auto", subtitle_mode="auto"
+        )
+        manager.delete(session.session_id)
+        return {"channel": channel, "prewarmed": True}
+    except (WatchError, ValueError) as exc:
+        raise _watch_error(exc)
+
+
 @router.get("/channels/{channel}/artwork")
 async def artwork(channel: str, request: Request, at: dt.datetime | None = None):
     """Serve only an already-indexed canonical series/movie image."""
