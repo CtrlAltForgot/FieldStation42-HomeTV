@@ -46,6 +46,9 @@ TITLE_ALIASES = {
     "spongebob": "SpongeBob SquarePants",
     "spongebob squarepants": "SpongeBob SquarePants",
     "under the dome": "Under the Dome",
+    # Some legacy/custom block builders persist the title before the final
+    # word. Keep that known incomplete identity from leaking into the guide.
+    "under the": "Under the Dome",
     "king of the hill": "King of the Hill",
 }
 MOVIE_TITLE_ALIASES = {
@@ -321,6 +324,7 @@ def _supplemental_display(path: str) -> dict:
 
 def program_display(path: str, fallback: str = "", meta: dict | None = None) -> dict:
     """Return one canonical program identity for the guide and watch client."""
+    meta = meta or {}
     display = (
         _episode_display(path, meta)
         or _directory_episode_display(path)
@@ -333,15 +337,38 @@ def program_display(path: str, fallback: str = "", meta: dict | None = None) -> 
         display = {
             "display_title": _guide_title_alias(fallback or Path(path).stem)
         }
+
+    # Bad or overly eager episode tags occasionally accompany movie files
+    # (notably disc rips with numbered audio tracks). A movie identity must
+    # never expose those values as season/episode information in the UI.
+    media_type = str(meta.get("type", "")).casefold()
+    title_is_movie = re.search(
+        r"\bmovie\b", str(display.get("display_title", "")), re.IGNORECASE
+    )
+    lives_in_movie_library = any(
+        part.casefold() in {"movie", "movies", "film", "films"}
+        for part in Path(path).parts[:-1]
+    )
+    if media_type in {"movie", "film"} or title_is_movie or lives_in_movie_library:
+        movie = _movie_display(path)
+        if movie:
+            display = movie
+        else:
+            display.pop("season", None)
+            display.pop("episode", None)
+            display.pop("episode_title", None)
+
     season = display.get("season")
     episode = display.get("episode")
     episode_title = display.get("episode_title", "")
-    details = []
-    if season not in (None, ""):
-        details.append(f"Season {season}")
-    if episode not in (None, ""):
-        details.append(f"Episode {str(episode).upper()}")
-    display["program_details"] = ", ".join(details)
+    if season not in (None, "") and episode not in (None, ""):
+        display["program_details"] = f"S{season}E{str(episode).upper()}"
+    elif season not in (None, ""):
+        display["program_details"] = f"S{season}"
+    elif episode not in (None, ""):
+        display["program_details"] = f"E{str(episode).upper()}"
+    else:
+        display["program_details"] = ""
     if episode_title:
         display["program_details"] += (
             ": " if display["program_details"] else ""

@@ -24,6 +24,7 @@
         let autoScrollEnabled = true; // Will be initialized from localStorage
         let debugShowFilename = false; // Debug: show raw file name instead of normalized title
         let virtualScrollPosition = 0;
+        let selectedProgram = null;
         const TIME_SLOT_WIDTH = 120; // pixels per 30-minute slot
         const SCROLL_SPEED = 0.033; // pixels per second (1 pixel per 30 seconds = slow realistic scroll)
         const VERTICAL_SCROLL_SPEED = 0.8; // pixels per scroll step for stations (ultra-smooth and relaxed)
@@ -61,6 +62,20 @@
 
             const content = `
                 <div class="guide-container">
+                    <section class="guide-preview" id="guide-preview" aria-live="polite">
+                        <div class="preview-visual" aria-hidden="true">
+                            <div class="preview-channel-mark" id="preview-channel-mark">42</div>
+                            <span class="preview-live-pill" id="preview-live-pill">ON NOW</span>
+                        </div>
+                        <div class="preview-copy">
+                            <div class="preview-kicker" id="preview-kicker">FIELDSTATION42 GUIDE</div>
+                            <h1 id="preview-title">Choose a program</h1>
+                            <p class="preview-details" id="preview-details">See what’s on across every channel.</p>
+                            <p class="preview-description" id="preview-description">Select a show below for its time, episode, and channel.</p>
+                            <div class="preview-progress" id="preview-progress" hidden><span></span></div>
+                        </div>
+                        <a class="preview-watch" id="preview-watch" href="/watch" target="_top" hidden>Watch live <span aria-hidden="true">▶</span></a>
+                    </section>
                     <div class="guide-timeline" id="timeline"></div>
                     <div class="guide-content">
                         <div class="guide-stations" id="stations-column"></div>
@@ -175,6 +190,53 @@
             return path.split(/[\\/]/).pop();
         }
 
+        function text(value, fallback = '') {
+            return value === null || value === undefined || value === '' ? fallback : String(value);
+        }
+
+        function formatGuideTime(date) {
+            return date.toLocaleTimeString('en-US', {
+                hour: 'numeric', minute: '2-digit', hour12: true
+            }).replace(' ', '').toLowerCase();
+        }
+
+        function selectProgram(block, station, programDiv) {
+            document.querySelectorAll('.program-block.is-selected').forEach(el => el.classList.remove('is-selected'));
+            if (programDiv) programDiv.classList.add('is-selected');
+            selectedProgram = { block, station, programDiv };
+
+            const start = new Date(block.start_time);
+            const end = new Date(block.end_time);
+            const isLive = start <= currentTime && end > currentTime;
+            const title = debugShowFilename
+                ? (getBlockFilename(block) || block.display_title || block.title)
+                : (block.display_title || block.title || 'Untitled');
+            const episode = text(block.program_details || block.episode_title);
+            const meta = block.meta || {};
+            const description = text(meta.plot || meta.description || meta.outline,
+                episode || 'Program information is not available yet.');
+
+            document.getElementById('preview-channel-mark').textContent = text(station.channel_number, '—');
+            document.getElementById('preview-kicker').textContent =
+                `${isLive ? 'ON NOW' : 'UPCOMING'} · CH ${text(station.channel_number, '—')} · ${text(station.network_long_name || station.network_name)}`;
+            document.getElementById('preview-title').textContent = title;
+            document.getElementById('preview-details').textContent =
+                `${formatGuideTime(start)}–${formatGuideTime(end)}${episode ? ` · ${episode}` : ''}`;
+            document.getElementById('preview-description').textContent = description;
+            document.getElementById('preview-live-pill').textContent = isLive ? 'ON NOW' : 'LATER';
+            document.getElementById('preview-live-pill').classList.toggle('is-upcoming', !isLive);
+
+            const progress = document.getElementById('preview-progress');
+            progress.hidden = !isLive;
+            if (isLive) {
+                const percent = Math.max(0, Math.min(100, 100 * (currentTime - start) / (end - start)));
+                progress.querySelector('span').style.width = `${percent}%`;
+            }
+            const watch = document.getElementById('preview-watch');
+            watch.hidden = !isLive || !station.channel_number;
+            watch.href = `/watch?channel=${encodeURIComponent(station.channel_number)}`;
+        }
+
         async function initializeGuide() {
             currentTime = new Date();
             
@@ -216,7 +278,7 @@
             // Set initial scroll position to show first station at top
             const stationsColumn = document.getElementById('stations-column');
             const guideGridContainer = document.querySelector('.guide-grid-container');
-            const containerHeight = window.innerHeight - 40; // Use full height minus timeline
+            const containerHeight = window.innerHeight - 250; // Use full height minus preview and timeline
             
             stationsColumn.scrollTop = containerHeight;
             guideGridContainer.scrollTop = containerHeight;
@@ -252,7 +314,7 @@
             const guideGrid = document.getElementById('guide-grid');
             const stationsColumn = document.getElementById('stations-column');
             const stationsHeight = stations.length * 60;
-            const availableHeight = window.innerHeight - 40; // Subtract timeline height
+            const availableHeight = window.innerHeight - 250; // Subtract preview and timeline
             
             // Set containers to full available height for better screen usage
             guideGridContainer.style.height = availableHeight + 'px';
@@ -266,7 +328,7 @@
 
         function createStationsColumn() {
             const stationsColumn = document.getElementById('stations-column');
-            const containerHeight = window.innerHeight - 40; // Use full height minus timeline
+            const containerHeight = window.innerHeight - 250; // Use full height minus preview and timeline
             
             let stationsHTML = '';
             
@@ -296,11 +358,12 @@
         async function loadScheduleData() {
             const grid = document.getElementById('guide-grid');
             const totalMinutes = (guideEndTime - guideStartTime) / (1000 * 60);
+            selectedProgram = null;
             grid.style.width = '100%';
             grid.innerHTML = '';
             
             // Add smooth blank space at the top to match the stations column
-            const containerHeight = window.innerHeight - 40; // Use full height minus timeline
+            const containerHeight = window.innerHeight - 250; // Use full height minus preview and timeline
             const topBlankDiv = document.createElement('div');
             topBlankDiv.style.height = containerHeight + 'px';
             topBlankDiv.style.width = '100%';
@@ -340,7 +403,7 @@
 
                     if (scheduleBlocks && scheduleBlocks.length > 0) {
                         for (const block of scheduleBlocks) {
-                            const blockElement = createProgramBlock(block);
+                            const blockElement = createProgramBlock(block, station);
                             if (blockElement) {
                                 stationRow.appendChild(blockElement);
                             }
@@ -376,7 +439,7 @@
             grid.appendChild(bottomBlankDiv);
         }
 
-        function createProgramBlock(block) {
+        function createProgramBlock(block, station) {
             const blockStart = new Date(block.start_time);
             const blockEnd = new Date(block.end_time);
             
@@ -409,6 +472,8 @@
             
             const programDiv = document.createElement('div');
             programDiv.className = 'program-block';
+            programDiv.tabIndex = 0;
+            programDiv.setAttribute('role', 'button');
             programDiv.style.left = left;
             programDiv.style.width = width;
             
@@ -427,10 +492,25 @@
                 hour12: false 
             });
             
-            programDiv.innerHTML = `
-                <span class="program-title">${title}</span>
-                <span class="program-time">${startTime}</span>
-            `;
+            const titleElement = document.createElement('span');
+            titleElement.className = 'program-title';
+            titleElement.textContent = title;
+            const timeElement = document.createElement('span');
+            timeElement.className = 'program-time';
+            timeElement.textContent = startTime;
+            programDiv.append(titleElement, timeElement);
+            programDiv.addEventListener('click', () => selectProgram(block, station, programDiv));
+            programDiv.addEventListener('focus', () => selectProgram(block, station, programDiv));
+            programDiv.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectProgram(block, station, programDiv);
+                }
+            });
+
+            if (!selectedProgram && blockStart <= currentTime && blockEnd > currentTime) {
+                requestAnimationFrame(() => selectProgram(block, station, programDiv));
+            }
             
             return programDiv;
         }
@@ -477,6 +557,9 @@
                         hour12: false 
                     });
                 updateTimelineMarker();
+                if (selectedProgram) {
+                    selectProgram(selectedProgram.block, selectedProgram.station, selectedProgram.programDiv);
+                }
             }, 1000);
         }
 
@@ -508,7 +591,7 @@
 
                     if (stationsColumn && guideGridContainer) {
                         const maxScroll = stationsColumn.scrollHeight - stationsColumn.clientHeight;
-                        const containerHeight = window.innerHeight - 40;
+                        const containerHeight = window.innerHeight - 250;
                         const stationsHeight = stations.length * 60;
 
                         // Only scroll if there are enough stations to warrant scrolling
@@ -520,7 +603,7 @@
                             
                             // Check if we're in the blank space area and should show branding
                             const stationsHeight = stations.length * 60;
-                            const blankSpaceHeight = window.innerHeight - 40;
+                            const blankSpaceHeight = window.innerHeight - 250;
                             
                             // Simple range check: show branding from when last station is nearly gone 
                             // until we've scrolled enough after reset to see stations from bottom

@@ -273,8 +273,10 @@
       channelSelect.innerHTML = channels.map(c =>
         `<option value="${c.channel_number}">${c.channel_number} — ${c.channel_name}</option>`
       ).join("");
+      const requested = new URLSearchParams(window.location.search).get("channel");
       const saved = localStorage.getItem("fs42-channel");
-      if (saved && channels.some(c => c.channel_number === saved)) channelSelect.value = saved;
+      if (requested && channels.some(c => c.channel_number === requested)) channelSelect.value = requested;
+      else if (saved && channels.some(c => c.channel_number === saved)) channelSelect.value = saved;
       if (!channelSelect.value && channels[0]) channelSelect.value = channels[0].channel_number;
       if (!channelSelect.value) throw new Error("No scheduled channels are configured");
       await tune(channelSelect.value);

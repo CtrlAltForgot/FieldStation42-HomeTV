@@ -128,7 +128,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(display["episode_title"], "Keeping Up with Our Joneses")
         self.assertEqual(
             program_display(path)["program_details"],
-            "Season 1, Episode 10: Keeping Up with Our Joneses",
+            "S1E10: Keeping Up with Our Joneses",
         )
 
     def test_guide_display_metadata_does_not_read_file_metadata(self):
@@ -178,6 +178,10 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "Game of Thrones")
 
+    def test_known_series_alias_repairs_truncated_under_the_dome_fallback(self):
+        display = program_display("/media/realm-playlist", "Under the")
+        self.assertEqual(display["display_title"], "Under the Dome")
+
     def test_truncated_multi_item_schedule_title_is_canonicalized(self):
         display = program_display("/media/realm-playlist", "Game of")
         self.assertEqual(display["display_title"], "Game of Thrones")
@@ -208,6 +212,22 @@ class ResolverTests(unittest.TestCase):
             display["display_title"],
             "The Super Mario Bros. Movie (2023)",
         )
+
+    def test_movie_drops_incorrect_episode_metadata(self):
+        display = program_display(
+            "/media/Movies/The SpongeBob SquarePants Movie.mkv",
+            meta={
+                "type": "episode",
+                "show_title": "The SpongeBob SquarePants Movie",
+                "season": 1,
+                "episode": 1,
+                "title": "Ac3",
+            },
+        )
+        self.assertEqual(display["display_title"], "The SpongeBob SquarePants Movie")
+        self.assertEqual(display["program_details"], "")
+        self.assertNotIn("season", display)
+        self.assertNotIn("episode", display)
 
     def test_clean_program_number_is_not_treated_as_episode_number(self):
         display = program_display(
@@ -271,7 +291,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(display["display_title"], "Chowder")
         self.assertEqual(
             display["program_details"],
-            "Season 2, Episode 11: The Dinner Theater",
+            "S2E11: The Dinner Theater",
         )
 
     def test_split_episode_code_is_normalized_for_viewers(self):
@@ -282,7 +302,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(display["episode"], 5)
         self.assertEqual(
             display["program_details"],
-            "Season 6, Episode 5: The Splinter",
+            "S6E5: The Splinter",
         )
 
     def test_episode_metadata_removes_parenthesized_resolution(self):
@@ -299,7 +319,7 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(
             display["program_details"],
-            "Season 6, Episode 5: The Splinter",
+            "S6E5: The Splinter",
         )
 
     def test_episode_metadata_removes_unclosed_resolution_suffix(self):
@@ -315,7 +335,7 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(
             display["program_details"],
-            "Season 6, Episode 5: The Splinter",
+            "S6E5: The Splinter",
         )
 
     def test_numbered_short_uses_directory_and_episode_title(self):
@@ -326,7 +346,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(display["display_title"], "Schoolhouse Rock")
         self.assertEqual(display["episode_title"], "Figure Eight")
         self.assertEqual(display["episode"], 8)
-        self.assertEqual(display["program_details"], "Episode 8: Figure Eight")
+        self.assertEqual(display["program_details"], "E8: Figure Eight")
 
     def test_numbered_short_in_shared_channel_folder_uses_known_series(self):
         display = program_display(
@@ -335,7 +355,7 @@ class ResolverTests(unittest.TestCase):
         )
         self.assertEqual(display["display_title"], "Schoolhouse Rock")
         self.assertEqual(display["episode_title"], "Figure Eight")
-        self.assertEqual(display["program_details"], "Episode 8: Figure Eight")
+        self.assertEqual(display["program_details"], "E8: Figure Eight")
 
     def test_recursive_scan_ignores_movie_auxiliary_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -873,7 +893,7 @@ class WatchAPITests(unittest.TestCase):
         self.assertEqual(payload["program_title"], "King of the Hill")
         self.assertEqual(
             payload["program_details"],
-            "Season 1, Episode 10: Keeping Up with Our Joneses",
+            "S1E10: Keeping Up with Our Joneses",
         )
 
     def test_invalid_profile_returns_validation_error(self):
