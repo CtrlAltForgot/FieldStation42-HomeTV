@@ -539,6 +539,24 @@ class ShowCatalog:
             elif candidate.count == min_count:
                 lowest_matches.append(candidate)
 
+        # Legacy series slots historically broke equal play-count ties at
+        # random, which could make a fresh catalog start at season 20. Keep
+        # movie/mixed pools random, but make a single identifiable series
+        # advance in canonical numeric episode order.
+        try:
+            from fs42.broadcast_scheduler import episode_identity
+
+            identified = [
+                identity for item in lowest_matches
+                if (identity := episode_identity(item))
+            ]
+            if (
+                len(identified) == len(lowest_matches)
+                and len({item.series_key for item in identified}) == 1
+            ):
+                return min(identified, key=lambda item: item.order).entry
+        except Exception:
+            pass
         return random.choice(lowest_matches)
 
     def get_all_by_tag(self, tag):

@@ -10,11 +10,20 @@ from fs42.live_news import schedule_blocks as live_schedule_blocks
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 EPISODE_RE = re.compile(
-    r"(?i)^(?P<series>.*?)[\s._-]*s(?P<season>\d{1,3})"
-    r"[\s._-]*e(?P<episode>\d{1,3}[a-z]*)[\s._-]*(?P<title>.*)$"
+    r"(?i)^(?P<series>.*?)[\s._\-\[(]*s(?P<season>\d{1,3})"
+    r"[\s._-]*e(?P<episode>\d{1,3}[a-z]*)[\])]*[\s._-]*(?P<title>.*)$"
 )
 LEADING_X_EPISODE_RE = re.compile(
     r"(?i)^0*(?P<season>\d{1,3})x0*(?P<episode>\d{1,3}[a-z]*)"
+    r"[\s._-]*(?P<title>.*)$"
+)
+SERIES_X_EPISODE_RE = re.compile(
+    r"(?i)^(?P<series>.*?)[\s._\-\[(]+0*(?P<season>\d{1,3})x"
+    r"0*(?P<episode>\d{1,3}[a-z]*)[\])]*[\s._-]*(?P<title>.*)$"
+)
+VERBOSE_EPISODE_RE = re.compile(
+    r"(?i)^(?P<series>.*?)[\s._\-\[(]+season[\s._-]*0*(?P<season>\d{1,3})"
+    r"[\s._-]+episode[\s._-]*0*(?P<episode>\d{1,3}[a-z]*)[\])]*"
     r"[\s._-]*(?P<title>.*)$"
 )
 LOOSE_EPISODE_RE = re.compile(
@@ -170,8 +179,13 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
     meta = meta or {}
     filename = Path(path).stem
     match = EPISODE_RE.match(filename)
+    x_match = SERIES_X_EPISODE_RE.match(filename)
+    verbose_match = VERBOSE_EPISODE_RE.match(filename)
     leading_match = LEADING_X_EPISODE_RE.match(filename)
-    if meta.get("type") != "episode" and not match and not leading_match:
+    if (
+        meta.get("type") != "episode"
+        and not match and not x_match and not verbose_match and not leading_match
+    ):
         return {}
 
     series_title = meta.get("show_title")
@@ -200,6 +214,32 @@ def _episode_display(path: str, meta: dict | None = None) -> dict:
             )
         season = season if season is not None else int(match.group("season"))
         episode = episode if episode is not None else match.group("episode")
+
+    if x_match:
+        if not series_title:
+            series_title = TitleParser.parse_title(
+                x_match.group("series").strip(" ._-")
+            )
+        if not episode_title and x_match.group("title"):
+            episode_title = _natural_title_case(
+                TitleParser.parse_title(
+                    RELEASE_SUFFIX_RE.sub("", x_match.group("title"))
+                )
+            )
+        season = season if season is not None else int(x_match.group("season"))
+        episode = episode if episode is not None else x_match.group("episode")
+
+    if verbose_match:
+        if not series_title:
+            series_title = TitleParser.parse_title(
+                verbose_match.group("series").strip(" ._-")
+            )
+        if not episode_title and verbose_match.group("title"):
+            episode_title = _natural_title_case(
+                TitleParser.parse_title(verbose_match.group("title"))
+            )
+        season = season if season is not None else int(verbose_match.group("season"))
+        episode = episode if episode is not None else verbose_match.group("episode")
 
     if leading_match:
         if not episode_title and leading_match.group("title"):

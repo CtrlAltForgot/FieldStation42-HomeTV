@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import threading
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -20,21 +21,52 @@ from fs42.title_parser import TitleParser
 
 LOG = logging.getLogger("MetadataEnrichment")
 EPISODE_RE = re.compile(
-    r"(?i)^(?P<series>.*?)[\s._-]*s(?P<season>\d{1,3})"
-    r"[\s._-]*e(?P<episode>\d{1,3})[a-z]?[\s._-]*(?P<title>.*)$"
+    r"(?i)^(?P<series>.*?)[\s._\-\[(]*s(?P<season>\d{1,3})"
+    r"[\s._-]*e(?P<episode>\d{1,3})[a-z]?[\])]*[\s._-]*(?P<title>.*)$"
 )
 LEADING_EPISODE_RE = re.compile(
     r"(?i)^0*(?P<season>\d{1,3})x0*(?P<episode>\d{1,3})"
+    r"[\s._-]*(?P<title>.*)$"
+)
+X_EPISODE_RE = re.compile(
+    r"(?i)^(?P<series>.*?)[\s._\-\[(]+0*(?P<season>\d{1,3})x"
+    r"0*(?P<episode>\d{1,3})[a-z]?[\])]*[\s._-]*(?P<title>.*)$"
+)
+VERBOSE_EPISODE_RE = re.compile(
+    r"(?i)^(?P<series>.*?)[\s._\-\[(]+season[\s._-]*0*(?P<season>\d{1,3})"
+    r"[\s._-]+episode[\s._-]*0*(?P<episode>\d{1,3})[\])]*"
     r"[\s._-]*(?P<title>.*)$"
 )
 SEASON_DIR_RE = re.compile(r"(?i)^(?:season[\s._-]*|s)(\d+)$")
 YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 ARTWORK_LOCK = threading.Lock()
 SERIES_INDEX_NAME = "series-index.json"
+SERIES_EQUIVALENTS = {
+    "shingekinokyojin": "attackontitan",
+}
 
 
 def _series_key(series: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", series.casefold())
+
+
+def _confident_series_match(query: str, result: dict) -> bool:
+    """Reject provider guesses that could attach another show's metadata."""
+    expected = _series_key(re.sub(r"\((?:19|20)\d{2}\)", "", query))
+    expected = SERIES_EQUIVALENTS.get(expected, expected)
+    candidates = [result.get("name"), result.get("original_name")]
+    for candidate in candidates:
+        actual = _series_key(str(candidate or ""))
+        actual = SERIES_EQUIVALENTS.get(actual, actual)
+        if not expected or not actual:
+            continue
+        if expected == actual:
+            return True
+        if min(len(expected), len(actual)) >= 6 and SequenceMatcher(
+            None, expected, actual
+        ).ratio() >= 0.88:
+            return True
+    return False
 
 
 def artwork_root() -> Path:
@@ -46,7 +78,12 @@ def artwork_root() -> Path:
 def _episode_identity(path: str, existing: dict) -> dict:
     media = Path(path)
     filename = media.stem
-    match = EPISODE_RE.match(filename) or LEADING_EPISODE_RE.match(filename)
+    match = (
+        EPISODE_RE.match(filename)
+        or X_EPISODE_RE.match(filename)
+        or VERBOSE_EPISODE_RE.match(filename)
+        or LEADING_EPISODE_RE.match(filename)
+    )
     if not match and existing.get("type") != "episode":
         return {}
     parent = media.parent
@@ -183,7 +220,11 @@ class MetadataEnricher:
     ) -> dict:
         report = log or (lambda message: LOG.info(message))
         unique_paths = list(dict.fromkeys(os.path.realpath(path) for path in paths))
-        stats = {"total": len(unique_paths), "updated": 0, "skipped": 0, "unmatched": 0}
+        stats = {
+            "total": len(unique_paths), "updated": 0, "skipped": 0,
+            "unmatched": 0, "identified_episodes": 0,
+            "unidentified_episodic": 0,
+        }
         tmdb_configured = self.helper.is_configured()
         if not tmdb_configured:
             report(
@@ -206,6 +247,17 @@ class MetadataEnricher:
                 except (TypeError, json.JSONDecodeError):
                     existing = {}
                 identity = _episode_identity(path, existing)
+                if identity:
+                    stats["identified_episodes"] += 1
+                elif (
+                    SEASON_DIR_RE.match(Path(path).parent.name)
+                    or re.search(
+                        r"(?i)(?:s\d{1,3}[ ._-]*e\d{1,3}|\d{1,3}x\d{1,3}|season.+episode)",
+                        Path(path).stem,
+                    )
+                ):
+                    stats["unidentified_episodic"] += 1
+                    report(f"Could not identify episodic media: {path}")
                 series = str(identity.get("series") or "").strip()
                 indexed_series_art = self.series_artwork(series) if series else None
                 configured_series_art = Path(
@@ -294,6 +346,14 @@ class MetadataEnricher:
             f"Metadata scan complete: {stats['updated']} updated, "
             f"{stats['skipped']} already complete, {stats['unmatched']} unmatched."
         )
+        episode_total = stats["identified_episodes"] + stats["unidentified_episodic"]
+        if episode_total:
+            coverage = 100 * stats["identified_episodes"] / episode_total
+            stats["episode_identification_percent"] = round(coverage, 2)
+            report(
+                f"Episode identification coverage: {coverage:.2f}% "
+                f"({stats['identified_episodes']}/{episode_total})."
+            )
         return stats
 
     def _enrich(self, path: str, existing: dict) -> dict | None:
@@ -330,6 +390,12 @@ class MetadataEnricher:
             if not result:
                 provider = self.fallback_helper
                 result = provider.search_tv(series)
+            if result and not _confident_series_match(series, result):
+                LOG.warning(
+                    "Rejected low-confidence series match %r -> %r",
+                    series, result.get("name"),
+                )
+                result = None
             if not result:
                 return None
             remote = {

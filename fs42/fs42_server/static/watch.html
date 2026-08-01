@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>myHomeTV — Watch</title>
-  <link rel="stylesheet" href="/static/watch.css?v=myhometv-20260801-live-news-2">
+  <link rel="stylesheet" href="/static/watch.css?v=myhometv-20260801-live-focus-1">
   <script defer src="/static/vendor/hls.min.js"></script>
-  <script defer src="/static/watch.js?v=myhometv-20260801-live-news-2"></script>
+  <script defer src="/static/watch.js?v=myhometv-20260801-live-focus-1"></script>
 </head>
 <body>
   <main id="viewer">
     <video id="video" class="stream-video" autoplay playsinline></video>
     <video id="video-next" class="stream-video" muted playsinline aria-hidden="true"></video>
-    <iframe id="live-news" class="stream-video" hidden allow="autoplay; encrypted-media; fullscreen" referrerpolicy="strict-origin-when-cross-origin" title="Official live news stream"></iframe>
+    <iframe id="live-news" class="stream-video" hidden tabindex="-1" aria-hidden="true" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" title="Official live news stream"></iframe>
     <div id="shade"></div>
     <section id="status" class="panel" aria-live="polite">
       <div id="channel-badge">
@@ -60,7 +60,7 @@
     </section>
     <aside id="guide" class="panel" hidden>
       <header><strong>Program guide</strong><button id="guide-close">×</button></header>
-      <iframe src="/static/guide_frame.html?embedded=watch" title="Program guide"></iframe>
+      <iframe src="/static/guide_frame.html?embedded=watch&v=myhometv-20260801-identity-1" title="Program guide"></iframe>
     </aside>
     <div id="message">Connecting to myHomeTV…</div>
   </main>

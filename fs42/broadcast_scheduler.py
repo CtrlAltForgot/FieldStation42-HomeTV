@@ -14,6 +14,10 @@ from fs42.title_parser import TitleParser
 
 NUMBER_RE = re.compile(r"0*(\d+)")
 FILE_EPISODE_RE = re.compile(r"(?i)s(\d{1,3})[ ._-]*e(\d{1,3})([a-z]?)")
+FILE_X_EPISODE_RE = re.compile(r"(?i)(\d{1,3})x(\d{1,3})([a-z]?)")
+FILE_VERBOSE_EPISODE_RE = re.compile(
+    r"(?i)season[ ._-]*(\d{1,3})[ ._-]+episode[ ._-]*(\d{1,3})([a-z]?)"
+)
 SEASON_DIR_RE = re.compile(r"(?i)^(?:season[ ._-]*|s)(\d+)$")
 
 
@@ -50,7 +54,11 @@ def episode_identity(entry) -> EpisodeIdentity | None:
     metadata = MetadataIO.read(path) or {}
     if str(metadata.get("type", "")).casefold() in {"movie", "film"}:
         return None
-    match = FILE_EPISODE_RE.search(os.path.basename(path))
+    match = (
+        FILE_EPISODE_RE.search(os.path.basename(path))
+        or FILE_X_EPISODE_RE.search(os.path.basename(path))
+        or FILE_VERBOSE_EPISODE_RE.search(os.path.basename(path))
+    )
     season = _number(metadata.get("season"))
     episode = _number(metadata.get("episode"))
     part = ""
@@ -120,6 +128,16 @@ class BroadcastHistory:
                 "CREATE INDEX IF NOT EXISTS idx_broadcast_history_slot "
                 "ON broadcast_history(station, slot_id, occurrence_key)"
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS broadcast_series_cursor (
+                    station TEXT NOT NULL,
+                    series_key TEXT NOT NULL,
+                    next_season INTEGER NOT NULL,
+                    next_episode INTEGER NOT NULL,
+                    updated_at TIMESTAMP NOT NULL,
+                    PRIMARY KEY(station, series_key)
+                )"""
+            )
 
     def reconcile(self, station: str, now: dt.datetime):
         with connect(self.db_path) as connection:
@@ -168,6 +186,12 @@ class BroadcastHistory:
                    ORDER BY series_key""",
                 (station,),
             ).fetchall()
+            cursors = {
+                row[0]: (row[1], row[2]) for row in connection.execute(
+                    "SELECT series_key, next_season, next_episode "
+                    "FROM broadcast_series_cursor WHERE station=?", (station,)
+                ).fetchall()
+            }
         return [
             {
                 "series_key": row[0],
@@ -175,9 +199,82 @@ class BroadcastHistory:
                 "reserved_count": row[2] or 0,
                 "last_aired": row[3],
                 "next_reserved": row[4],
+                "next_override": (
+                    {"season": cursors[row[0]][0], "episode": cursors[row[0]][1]}
+                    if row[0] in cursors else None
+                ),
             }
             for row in rows
         ]
+
+    def detail_rows(self, station: str, series_key: str) -> list[dict]:
+        self.reconcile(station, dt.datetime.now())
+        with connect(self.db_path) as connection:
+            rows = connection.execute(
+                """SELECT id, season, episode, part, airing_kind, status,
+                          scheduled_start, scheduled_end
+                   FROM broadcast_history
+                   WHERE station=? AND series_key=?
+                   ORDER BY season, episode, part, scheduled_start""",
+                (station, series_key),
+            ).fetchall()
+        return [
+            {"id": row[0], "season": row[1], "episode": row[2],
+             "part": row[3], "airing_kind": row[4], "status": row[5],
+             "scheduled_start": row[6], "scheduled_end": row[7]}
+            for row in rows
+        ]
+
+    def cursor(self, station: str, series_key: str) -> tuple[int, int] | None:
+        with connect(self.db_path) as connection:
+            row = connection.execute(
+                "SELECT next_season, next_episode FROM broadcast_series_cursor "
+                "WHERE station=? AND series_key=?", (station, series_key),
+            ).fetchone()
+        return (int(row[0]), int(row[1])) if row else None
+
+    def set_cursor(self, station: str, series_key: str, season: int, episode: int):
+        with connect(self.db_path) as connection:
+            connection.execute(
+                """INSERT INTO broadcast_series_cursor
+                   (station, series_key, next_season, next_episode, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(station, series_key) DO UPDATE SET
+                   next_season=excluded.next_season,
+                   next_episode=excluded.next_episode,
+                   updated_at=excluded.updated_at""",
+                (station, series_key, season, episode, dt.datetime.now()),
+            )
+            connection.execute(
+                "DELETE FROM broadcast_history WHERE station=? AND series_key=? "
+                "AND status='reserved'", (station, series_key),
+            )
+
+    def clear_future(self, station: str, series_key: str):
+        with connect(self.db_path) as connection:
+            connection.execute(
+                "DELETE FROM broadcast_history WHERE station=? AND series_key=? "
+                "AND status='reserved'", (station, series_key),
+            )
+
+    def reset_series(self, station: str, series_key: str):
+        with connect(self.db_path) as connection:
+            connection.execute(
+                "DELETE FROM broadcast_history WHERE station=? AND series_key=?",
+                (station, series_key),
+            )
+            connection.execute(
+                "DELETE FROM broadcast_series_cursor WHERE station=? AND series_key=?",
+                (station, series_key),
+            )
+
+    def remove_entry(self, station: str, series_key: str, row_id: int):
+        with connect(self.db_path) as connection:
+            cursor = connection.execute(
+                "DELETE FROM broadcast_history WHERE id=? AND station=? AND series_key=?",
+                (row_id, station, series_key),
+            )
+            return bool(cursor.rowcount)
 
     def reserve(self, station: str, programming: dict, start: dt.datetime, end: dt.datetime):
         with connect(self.db_path) as connection:
@@ -310,9 +407,14 @@ class BroadcastScheduler:
             and not occurrence_has_premiere
             and self._premiere_due(policy, when)
         ):
+            cursor = self.history.cursor(self.station, series_key)
             selected = next(
                 (
                     item for item in identities
+                    if (
+                        cursor is None
+                        or (item.season, item.episode) >= cursor
+                    )
                     if logical_key(
                         item.season, item.episode, item.part, item.path
                     ) not in used_premieres

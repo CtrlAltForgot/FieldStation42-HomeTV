@@ -2,6 +2,7 @@ import datetime as dt
 import asyncio
 import json
 import os
+import re
 import tempfile
 import time
 import unittest
@@ -21,7 +22,7 @@ from fs42.hometv import (
     UnsafeMediaPath,
 )
 from fs42.media_processor import MediaProcessor
-from fs42.metadata_enrichment import MetadataEnricher
+from fs42.metadata_enrichment import MetadataEnricher, _episode_identity
 from fs42.tvmaze_helper import TVmazeHelper
 from fs42.broadcast_scheduler import BroadcastScheduler
 from fs42.schedule_promos import SchedulePromoAgent
@@ -139,6 +140,29 @@ class ResolverTests(unittest.TestCase):
             program_display(path)["program_details"],
             "S1E10: Keeping Up with Our Joneses",
         )
+
+    def test_series_prefixed_x_episode_is_identified_everywhere(self):
+        path = "/media/Forensic Files/Season 07/Forensic Files 07x36 All Charged Up.mkv"
+        display = program_display(path)
+        identity = _episode_identity(path, {})
+        self.assertEqual(display["display_title"], "Forensic Files")
+        self.assertEqual(display["program_details"], "S7E36: All Charged Up")
+        self.assertEqual(identity["series"], "Forensic Files")
+        self.assertEqual((identity["season"], identity["episode"]), (7, 36))
+
+    def test_verbose_season_episode_name_is_identified(self):
+        path = "/media/Example/Season 02/Example Season 2 Episode 11 The Return.mkv"
+        identity = _episode_identity(path, {})
+        self.assertEqual(identity["series"], "Example")
+        self.assertEqual((identity["season"], identity["episode"]), (2, 11))
+
+    def test_bracketed_episode_code_is_identified(self):
+        path = "/media/Example/Season 03/Example [S03E09] The Answer.mkv"
+        display = program_display(path)
+        identity = _episode_identity(path, {})
+        self.assertEqual(display["display_title"], "Example")
+        self.assertEqual(display["program_details"], "S3E9: The Answer")
+        self.assertEqual((identity["season"], identity["episode"]), (3, 9))
 
     def test_guide_display_metadata_does_not_read_file_metadata(self):
         block = SimpleNamespace(
@@ -1009,6 +1033,82 @@ class BroadcastSchedulerTests(unittest.TestCase):
                 [f"/media/Test Show S01E{i:02d}.mkv" for i in range(1, 5)],
             )
             self.assertTrue(all(row[8] == "reserved" for row in rows))
+
+    def test_numeric_order_never_jumps_to_season_twenty(self):
+        entries = [
+            SimpleNamespace(path=path, realpath=None) for path in (
+                "/media/Test Show S20E01.mkv",
+                "/media/Test Show S02E01.mkv",
+                "/media/Test Show S01E10.mkv",
+                "/media/Test Show S01E02.mkv",
+            )
+        ]
+        def metadata(path):
+            match = re.search(r"S(\d+)E(\d+)", path)
+            return {"type": "episode", "show_title": "Test Show",
+                    "season": int(match.group(1)), "episode": int(match.group(2))}
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=metadata
+        ):
+            scheduler = BroadcastScheduler("Channel", str(Path(temp_dir) / "history.db"))
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            chosen = []
+            for week in range(4):
+                when = dt.datetime(2026, 1, 1) + dt.timedelta(weeks=week)
+                entry, programming = scheduler.select(slot, "show", entries, when)
+                chosen.append(entry.path)
+                scheduler.stage(programming, when, when + dt.timedelta(hours=1))
+            self.assertEqual(chosen, [entries[i].path for i in (3, 2, 1, 0)])
+
+    def test_legacy_equal_play_counts_choose_chronological_episode(self):
+        from fs42.catalog import ShowCatalog
+
+        candidates = [
+            SimpleNamespace(path=path, realpath=None, count=0) for path in (
+                "/media/Test Show S20E01.mkv",
+                "/media/Test Show S01E02.mkv",
+                "/media/Test Show S01E01.mkv",
+            )
+        ]
+        def metadata(path):
+            match = re.search(r"S(\d+)E(\d+)", path)
+            return {"type": "episode", "show_title": "Test Show",
+                    "season": int(match.group(1)), "episode": int(match.group(2))}
+        with patch("fs42.broadcast_scheduler.MetadataIO.read", side_effect=metadata):
+            selected = ShowCatalog._lowest_count(SimpleNamespace(), candidates)
+        self.assertTrue(selected.path.endswith("S01E01.mkv"))
+
+    def test_history_cursor_and_reset_control_next_premiere(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler("Channel", str(Path(temp_dir) / "history.db"))
+            scheduler.history.set_cursor("Channel", "test-show", 1, 3)
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            entry, _ = scheduler.select(slot, "show", self._entries(), dt.datetime(2026, 1, 1))
+            self.assertTrue(entry.path.endswith("S01E03.mkv"))
+            scheduler.history.reset_series("Channel", "test-show")
+            entry, _ = scheduler.select(slot, "show", self._entries(), dt.datetime(2026, 1, 1))
+            self.assertTrue(entry.path.endswith("S01E01.mkv"))
+
+    def test_history_editor_can_remove_entry_and_future_reservations(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "fs42.broadcast_scheduler.MetadataIO.read", side_effect=self._metadata
+        ):
+            scheduler = BroadcastScheduler("Channel", str(Path(temp_dir) / "history.db"))
+            slot = {"programming": {"mode": "premiere", "slot_id": "weekly"}}
+            for week in range(2):
+                when = dt.datetime.now() + dt.timedelta(weeks=week + 1)
+                _, programming = scheduler.select(slot, "show", self._entries(), when)
+                scheduler.stage(programming, when, when + dt.timedelta(hours=1))
+            scheduler.commit()
+            details = scheduler.history.detail_rows("Channel", "test-show")
+            self.assertEqual(len(details), 2)
+            self.assertTrue(scheduler.history.remove_entry(
+                "Channel", "test-show", details[0]["id"]
+            ))
+            scheduler.history.clear_future("Channel", "test-show")
+            self.assertEqual(scheduler.history.detail_rows("Channel", "test-show"), [])
 
     def test_reruns_use_only_aired_premieres_and_respect_repeat_gap(self):
         with tempfile.TemporaryDirectory() as temp_dir, patch(

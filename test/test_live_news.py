@@ -170,6 +170,43 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("YT.PlayerState.PAUSED", player)
         self.assertNotIn("player.pauseVideo()", player)
 
+    def test_scheduler_exposes_confirmed_history_repairs(self):
+        scheduler = open(
+            "fs42/fs42_server/static/scheduler.html", encoding="utf-8"
+        ).read()
+        self.assertIn("Edit history", scheduler)
+        self.assertIn("Set next episode", scheduler)
+        self.assertIn("Remove future reservations", scheduler)
+        self.assertIn("Remove history and start over", scheduler)
+        self.assertIn("confirm(confirmation)", scheduler)
+
+    def test_outer_pages_bust_stale_guide_frame_cache(self):
+        for path in (
+            "fs42/fs42_server/static/index.html",
+            "fs42/fs42_server/static/watch.html",
+            "fs42/fs42_server/static/guide.html",
+        ):
+            page = open(path, encoding="utf-8").read()
+            self.assertIn("guide_frame.html?", page)
+            self.assertIn("v=myhometv-20260801-identity-1", page)
+
+    def test_live_news_cannot_trap_pc_navigation(self):
+        watch_html = open(
+            "fs42/fs42_server/static/watch.html", encoding="utf-8"
+        ).read()
+        watch_css = open(
+            "fs42/fs42_server/static/watch.css", encoding="utf-8"
+        ).read()
+        watch_js = open(
+            "fs42/fs42_server/static/watch.js", encoding="utf-8"
+        ).read()
+        self.assertIn('id="live-news"', watch_html)
+        self.assertIn('tabindex="-1"', watch_html)
+        self.assertIn("#live-news { z-index: 0", watch_css)
+        self.assertIn("pointer-events: none", watch_css)
+        self.assertIn('event.key === "Escape"', watch_js)
+        self.assertIn("setGuideVisible(guide.hidden)", watch_js)
+
 
 if __name__ == "__main__":
     unittest.main()

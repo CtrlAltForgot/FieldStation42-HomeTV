@@ -24,7 +24,7 @@ html, body, #viewer {
   opacity: 1;
   transition: opacity .45s ease;
 }
-#live-news { border: 0; }
+#live-news { z-index: 0; border: 0; pointer-events: none; user-select: none; }
 #live-news[hidden] { display: none; }
 #video.switching { opacity: 0; }
 #video-next { visibility: hidden; }
@@ -38,7 +38,7 @@ html, body, #viewer {
 }
 .panel {
   position: fixed;
-  z-index: 2;
+  z-index: 3;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity .22s ease, transform .22s ease;

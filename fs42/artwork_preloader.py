@@ -20,8 +20,9 @@ def status() -> dict:
 
 
 def prepare_all_series() -> dict:
-    """Cache one image per catalog series; safe to repeat after every rebuild."""
+    """Cache every series and movie; safe to repeat after every rebuild."""
     paths: dict[str, tuple[str, str]] = {}
+    movies: dict[str, str] = {}
     try:
         for station in StationManager().stations:
             if not station.get("_has_catalog"):
@@ -39,6 +40,8 @@ def prepare_all_series() -> dict:
                 series = str(identity.get("series") or "").strip()
                 if series:
                     paths.setdefault(series.casefold(), (series, path))
+                else:
+                    movies.setdefault(path, path)
     except Exception as exc:
         with _LOCK:
             _STATUS.update(
@@ -48,12 +51,24 @@ def prepare_all_series() -> dict:
         return status()
     with _LOCK:
         _STATUS.clear()
-        _STATUS.update(state="running", total=len(paths), complete=0, failed=0)
+        _STATUS.update(
+            state="running", total=len(paths) + len(movies),
+            complete=0, failed=0,
+        )
     enricher = MetadataEnricher()
     for series, path in paths.values():
         try:
             if not enricher.ensure_series_artwork(series, path):
                 raise RuntimeError("no readable artwork source")
+            with _LOCK:
+                _STATUS["complete"] += 1
+        except Exception:
+            with _LOCK:
+                _STATUS["failed"] += 1
+    for path in movies.values():
+        try:
+            if not enricher.ensure_local_artwork(path):
+                raise RuntimeError("no readable movie artwork source")
             with _LOCK:
                 _STATUS["complete"] += 1
         except Exception:

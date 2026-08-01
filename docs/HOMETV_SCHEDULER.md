@@ -114,6 +114,17 @@ The channel-history panel shows aired and scheduled totals, the last actual
 airtime, and the next reservation. History begins only after a realistic slot
 has been generated or an older past schedule has been migrated.
 
+Select **Edit history** beside a series to inspect its chronological airing
+records. The editor can remove one incorrect record, remove future
+reservations, set an explicit next season/episode, or remove the series history
+and restart at S1E1. Destructive actions require confirmation. After changing
+history, use **Reset schedule + one week** on the main page so existing future
+schedule blocks cannot restore stale reservations.
+
+Premieres are always selected in numeric `(season, episode, multipart)` order;
+filesystem and alphabetical filename order are never used. **Set next episode**
+is the only intentional way to skip earlier available episodes.
+
 ## Channel promos and bumper folders
 
 Catalog rebuilds create:

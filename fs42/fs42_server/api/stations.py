@@ -47,6 +47,14 @@ class ErrorResponse(BaseModel):
     error: str
     details: Optional[str] = None
 
+
+class SchedulerHistoryEdit(BaseModel):
+    action: str
+    series_key: str
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    row_id: Optional[int] = None
+
 # Endpoints
 
 @router.get("", response_model=StationListResponse)
@@ -92,6 +100,52 @@ async def get_scheduler_history(network_name: str):
     return {
         "network_name": network_name,
         "series": history.summaries(network_name),
+    }
+
+
+@router.get("/{network_name}/scheduler-history/{series_key}")
+async def get_scheduler_history_details(network_name: str, series_key: str):
+    manager = StationManager()
+    if manager.station_by_name(network_name) is None:
+        raise HTTPException(404, f"Station '{network_name}' not found")
+    history = BroadcastHistory(manager.server_conf["db_path"])
+    return {
+        "network_name": network_name,
+        "series_key": series_key,
+        "cursor": history.cursor(network_name, series_key),
+        "airings": history.detail_rows(network_name, series_key),
+    }
+
+
+@router.post("/{network_name}/scheduler-history/edit")
+async def edit_scheduler_history(network_name: str, body: SchedulerHistoryEdit):
+    manager = StationManager()
+    if manager.station_by_name(network_name) is None:
+        raise HTTPException(404, f"Station '{network_name}' not found")
+    series_key = body.series_key.strip().casefold()
+    if not series_key or len(series_key) > 160:
+        raise HTTPException(400, "Invalid series identity")
+    history = BroadcastHistory(manager.server_conf["db_path"])
+    if body.action == "reset_series":
+        history.reset_series(network_name, series_key)
+    elif body.action == "clear_future":
+        history.clear_future(network_name, series_key)
+    elif body.action == "set_next":
+        if body.season is None or body.episode is None or body.season < 0 or body.episode < 1:
+            raise HTTPException(400, "Season and episode are required")
+        history.set_cursor(
+            network_name, series_key, body.season, body.episode
+        )
+    elif body.action == "remove_entry":
+        if body.row_id is None or not history.remove_entry(
+            network_name, series_key, body.row_id
+        ):
+            raise HTTPException(404, "History entry not found")
+    else:
+        raise HTTPException(400, "Unknown history action")
+    return {
+        "success": True,
+        "message": "History updated. Regenerate the future schedule to apply it.",
     }
 
 

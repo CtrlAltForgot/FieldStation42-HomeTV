@@ -294,6 +294,8 @@
         liveFrame.src = result.embed_url;
         liveFrame.hidden = false;
         video.classList.remove("switching");
+        document.querySelector("#guide-button").focus({preventScroll: true});
+        showControls();
         playbackStarted = true;
       } else if (prepared) {
         hls = prepared.hls || null;
@@ -492,6 +494,12 @@
   });
   document.addEventListener("keydown", event => {
     showControls();
+    const guide = document.querySelector("#guide");
+    if (event.key === "Escape" || event.key === "Backspace") {
+      event.preventDefault();
+      setGuideVisible(guide.hidden);
+      return;
+    }
     if ((event.key === "Enter" || event.key === " ") && sessionId && video.paused) {
       requestPlayback();
     }
