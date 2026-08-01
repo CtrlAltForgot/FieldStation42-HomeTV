@@ -46,13 +46,10 @@ class LiquidSchedule:
             return duration
         return multiple * math.ceil(duration / multiple)
 
-    def _feature_target_duration(self, candidate, increment=None):
-        """Movies run at their real length; episodic TV may use padded slots."""
+    def _candidate_is_movie(self, candidate):
         path = candidate.realpath or candidate.path
         metadata = MetadataIO.read(path)
-        if MediaProcessor.is_movie(path, metadata):
-            return candidate.duration
-        return self._calc_target_duration(candidate.duration, increment)
+        return MediaProcessor.is_movie(path, metadata)
 
     def _load_blocks(self):
         self._blocks = LiquidAPI.get_blocks(self.conf)
@@ -146,9 +143,17 @@ class LiquidSchedule:
 
             break_info, break_strategy, increment = self._break_info(slot_config, tag_str, candidate.path)
 
-            target_duration = self._feature_target_duration(candidate, increment)
+            is_movie = self._candidate_is_movie(candidate)
+            target_duration = self._calc_target_duration(candidate.duration, increment)
             next_mark = current_mark + datetime.timedelta(seconds=target_duration)
-            new_block = LiquidBlock(candidate, current_mark, next_mark, candidate.title, break_strategy, break_info)
+            new_block = LiquidBlock(
+                candidate,
+                current_mark,
+                next_mark,
+                candidate.title,
+                "end" if is_movie else break_strategy,
+                break_info,
+            )
             # add sequence information
             if seq_key:
                 new_block.sequence_key = seq_key

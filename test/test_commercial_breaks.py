@@ -18,7 +18,7 @@ from fs42.liquid_schedule import LiquidSchedule
 
 
 class CommercialBreakSelectionTests(unittest.TestCase):
-    def test_movie_uses_exact_runtime_instead_of_ad_padding(self):
+    def test_movie_library_path_is_identified_without_metadata(self):
         schedule = LiquidSchedule.__new__(LiquidSchedule)
         schedule.conf = {"schedule_increment": 30}
         movie = SimpleNamespace(
@@ -27,9 +27,7 @@ class CommercialBreakSelectionTests(unittest.TestCase):
             duration=7_500,
         )
         with patch("fs42.liquid_schedule.MetadataIO.read", return_value=None):
-            target = schedule._feature_target_duration(movie)
-        self.assertEqual(target, 7_500)
-        self.assertNotEqual(target, schedule._calc_target_duration(7_500))
+            self.assertTrue(schedule._candidate_is_movie(movie))
 
     def test_movie_metadata_disables_padding_outside_movies_folder(self):
         schedule = LiquidSchedule.__new__(LiquidSchedule)
@@ -43,7 +41,42 @@ class CommercialBreakSelectionTests(unittest.TestCase):
             "fs42.liquid_schedule.MetadataIO.read",
             return_value={"type": "movie"},
         ):
-            self.assertEqual(schedule._feature_target_duration(movie), 7_500)
+            self.assertTrue(schedule._candidate_is_movie(movie))
+
+    def test_end_strategy_never_interrupts_movie_for_commercials(self):
+        movie = SimpleNamespace(
+            path="/media/Movies/The Feature.mkv",
+            duration=7_500,
+            content_type="feature",
+            media_type="video",
+        )
+        commercial = SimpleNamespace(
+            make_plan=lambda: [
+                BlockPlanEntry(
+                    "/ads/ad.mkv", 0, 30, content_type="commercial"
+                )
+            ]
+        )
+        plan = ReelCutter.cut_reels_into_base(
+            base_clip=movie,
+            reel_blocks=[commercial],
+            base_offset=0,
+            base_duration=movie.duration,
+            break_strategy="end",
+            start_bump=None,
+            end_bump=None,
+            break_points=[
+                {"chapter_start": 0, "chapter_end": 3_600},
+                {"chapter_start": 3_600, "chapter_end": 7_500},
+            ],
+        )
+        self.assertEqual(
+            [(item.path, item.content_type) for item in plan],
+            [
+                (movie.path, "feature"),
+                ("/ads/ad.mkv", "commercial"),
+            ],
+        )
     def test_exact_length_commercial_fills_gap_without_dead_air(self):
         catalog = ShowCatalog.__new__(ShowCatalog)
         exact = CatalogEntry("/ads/exact.mkv", 30, "commercials")
