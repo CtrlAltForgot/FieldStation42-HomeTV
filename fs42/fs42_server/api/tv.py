@@ -14,6 +14,9 @@ from fs42.station_manager import StationManager
 
 router = APIRouter(prefix="/api/tv", tags=["tv-clients"])
 
+ROKU_GUIDE_WINDOW_SECONDS = 10_800
+ROKU_GUIDE_TRACK_WIDTH = 1_490
+
 
 def _iso(value: dt.datetime) -> str:
     return value.replace(microsecond=0).isoformat()
@@ -25,7 +28,9 @@ def _field(program, name: str, default=None):
     )
 
 
-def _compact_tv_program(program, guide_start: dt.datetime):
+def _compact_tv_program(
+    program, guide_start: dt.datetime, current_offset_second: int = 0,
+):
     """Attach all couch-guide data while dropping the bulky metadata object."""
     starts = _field(program, "start_time")
     ends = _field(program, "end_time")
@@ -42,6 +47,8 @@ def _compact_tv_program(program, guide_start: dt.datetime):
         or _field(program, "program_details", "")
         or ""
     )
+    start_second = int((starts - guide_start).total_seconds())
+    end_second = int((ends - guide_start).total_seconds())
     return {
         "title": _field(program, "title", ""),
         "display_title": _field(program, "display_title", "")
@@ -52,8 +59,18 @@ def _compact_tv_program(program, guide_start: dt.datetime):
         "end_time": _iso(ends),
         "guide_start_minute": (starts - guide_start).total_seconds() / 60,
         "guide_end_minute": (ends - guide_start).total_seconds() / 60,
-        "guide_start_second": int((starts - guide_start).total_seconds()),
-        "guide_end_second": int((ends - guide_start).total_seconds()),
+        "guide_start_second": start_second,
+        "guide_end_second": end_second,
+        # Roku receives final, integer-only positions relative to NOW. Roku's
+        # runtime has produced inconsistent float layout on real televisions.
+        "roku_start_pixel": int(
+            (start_second - current_offset_second)
+            * ROKU_GUIDE_TRACK_WIDTH / ROKU_GUIDE_WINDOW_SECONDS
+        ),
+        "roku_end_pixel": int(
+            (end_second - current_offset_second)
+            * ROKU_GUIDE_TRACK_WIDTH / ROKU_GUIDE_WINDOW_SECONDS
+        ),
         "guide_time": start_label,
         "guide_time_range": f"{start_label}–{end_label}",
         "artwork_url": _field(program, "artwork_url", ""),
@@ -76,6 +93,18 @@ def guide_card_rect(
         int((visible_end - visible_start) * track_width / window_seconds) - 6,
     )
     return x, min(width, track_width - x)
+
+
+def roku_card_rect(
+    start_pixel: int, end_pixel: int, viewport_pixel: int = 0,
+    track_width: int = ROKU_GUIDE_TRACK_WIDTH,
+) -> tuple[int, int] | None:
+    """Exact clipping performed by Roku after server-side pixel conversion."""
+    visible_start = max(start_pixel - viewport_pixel, 0)
+    visible_end = min(end_pixel - viewport_pixel, track_width)
+    if visible_end <= visible_start:
+        return None
+    return visible_start, max(72, visible_end - visible_start - 6)
 
 
 @router.get("/config")
@@ -125,6 +154,7 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
     now = dt.datetime.now()
     start = now.replace(second=0, microsecond=0)
     end = start + dt.timedelta(hours=hours)
+    current_offset_second = int((now - start).total_seconds())
     rows = []
     for station in StationManager().stations:
         if station.get("hidden") or not (
@@ -154,7 +184,10 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
                     "Canonical artwork index is incomplete for: "
                     + ", ".join(dict.fromkeys(missing[:5])),
                 )
-        programs = [_compact_tv_program(program, start) for program in programs]
+        programs = [
+            _compact_tv_program(program, start, current_offset_second)
+            for program in programs
+        ]
         rows.append({
             "channel_number": str(station["channel_number"]),
             "channel_name": station.get("network_long_name")
@@ -177,12 +210,17 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
         "end": _iso(end),
         "server_time": _iso(now),
         "current_offset_minute": (now - start).total_seconds() / 60,
-        "current_offset_second": int((now - start).total_seconds()),
+        "current_offset_second": current_offset_second,
+        "roku_track_width": ROKU_GUIDE_TRACK_WIDTH,
         "channels": rows,
         "artwork_ready": True,
         "timeline": [
             {
                 "minute": minute,
+                "roku_pixel": int(
+                    (minute * 60 - current_offset_second)
+                    * ROKU_GUIDE_TRACK_WIDTH / ROKU_GUIDE_WINDOW_SECONDS
+                ),
                 "label": (start + dt.timedelta(minutes=minute)).strftime(
                     "%I:%M%p"
                 ).lstrip("0").lower(),

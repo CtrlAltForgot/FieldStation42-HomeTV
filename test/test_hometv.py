@@ -40,7 +40,11 @@ from fs42.fs42_server.api.watch import (
 )
 from fs42.fs42_server.api import build as build_api
 from fs42.fs42_server.api import settings as settings_api
-from fs42.fs42_server.api.tv import _compact_tv_program, guide_card_rect
+from fs42.fs42_server.api.tv import (
+    _compact_tv_program,
+    guide_card_rect,
+    roku_card_rect,
+)
 from fs42.fs42_server.api.schedules import (
     _attach_meta,
     _episode_display,
@@ -2116,6 +2120,34 @@ class TVGuideAPITests(unittest.TestCase):
         self.assertEqual(compact["guide_start_second"], 0)
         self.assertEqual(compact["guide_end_second"], 21_600)
         self.assertEqual(guide_card_rect(0, 21_600, 0), (0, 1_484))
+
+    def test_roku_payload_precomputes_pixels_relative_to_now(self):
+        start = dt.datetime(2026, 8, 1, 16, 44)
+        program = {
+            "start_time": start - dt.timedelta(minutes=2),
+            "end_time": start + dt.timedelta(minutes=5),
+            "title": "Schoolhouse Rock",
+        }
+        compact = _compact_tv_program(program, start, current_offset_second=45)
+        self.assertEqual(compact["roku_start_pixel"], -22)
+        self.assertEqual(compact["roku_end_pixel"], 35)
+        self.assertEqual(roku_card_rect(-22, 35), (0, 72))
+
+    def test_roku_runtime_fixture_has_visible_card_on_every_guide_row(self):
+        # Mirrors the reported TV at 4:45: current episodes begin before NOW,
+        # upcoming episodes and a long movie extend beyond it, and news is live.
+        rows = [
+            [(-22, 35), (35, 242), (242, 490)],
+            [(-124, 83), (83, 331)],
+            [(-455, 372), (372, 869)],
+            [(-620, 124), (124, 621)],
+            [(-41, 207), (207, 455)],
+            [(-1_430, 91), (91, 1_490)],
+            [(-4_000, 4_000)],
+        ]
+        visible = [[roku_card_rect(*card) for card in row] for row in rows]
+        self.assertTrue(all(any(card is not None for card in row) for row in visible))
+        self.assertEqual(visible[-1][0], (0, 1_484))
 
 
 class BuildOperationTests(unittest.TestCase):
