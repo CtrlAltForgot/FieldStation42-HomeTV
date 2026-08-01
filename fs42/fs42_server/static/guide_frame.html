@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>myHomeTV Guide</title>
-  <link rel="stylesheet" href="/static/guide.css?v=myhometv-20260801-live-news-2">
+  <link rel="stylesheet" href="/static/guide.css?v=myhometv-20260801-series-art-2">
   <script defer src="/static/vendor/hls.min.js"></script>
   <script defer src="/static/fs42_client.js"></script>
   <script defer src="/static/common.js"></script>
-  <script defer src="/static/guide.js?v=myhometv-20260801-live-news-2"></script>
+  <script defer src="/static/guide.js?v=myhometv-20260801-series-art-2"></script>
 </head>
 <body>
   <main id="guide-app" aria-label="Program guide">
@@ -17,11 +17,9 @@
         <img id="preview-art" alt="" hidden>
         <video id="preview-video" autoplay muted playsinline disablepictureinpicture controlslist="nopictureinpicture" hidden></video>
         <iframe id="preview-live-news" title="Live news preview" allow="autoplay; encrypted-media" tabindex="-1" hidden></iframe>
-        <div id="preview-fallback" aria-hidden="true">
-          <span>CH</span><strong id="preview-channel">--</strong>
-        </div>
         <span id="preview-status">GUIDE</span>
-        <div id="preview-loading" hidden><i></i><span>Preview loading</span></div>
+        <div id="artwork-loading" class="media-loading" hidden><i></i><span>Artwork loading</span></div>
+        <div id="preview-loading" class="media-loading" hidden><i></i><span>Preview loading</span></div>
       </div>
       <div id="preview-copy">
         <p id="preview-kicker">MYHOMETV</p>

@@ -48,13 +48,10 @@ button { font: inherit; }
 #preview-media::after { content: ""; position: absolute; inset: 55% 0 0; pointer-events: none; background: linear-gradient(transparent, rgba(0,0,0,.58)); }
 #preview-art, #preview-video, #preview-live-news { width: 100%; height: 100%; object-fit: cover; background: #020304; border:0; }
 #preview-live-news[hidden] { display:none; }
-#preview-fallback { width: 100%; height: 100%; display: grid; place-content: center; text-align: center; background: radial-gradient(circle, rgba(80,176,255,.2), transparent 62%); }
-#preview-fallback span { color: #9ccfea; font-size: clamp(10px, .8vw, 14px); font-weight: 800; letter-spacing: .24em; }
-#preview-fallback strong { font-size: clamp(52px, 6vw, 92px); line-height: .96; text-shadow: 0 8px 28px rgba(0,0,0,.45); }
 #preview-status { position: absolute; z-index: 2; left: 14px; bottom: 12px; padding: 5px 9px; border-radius: 4px; background: #df2942; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
 #preview-status.upcoming { background: rgba(9,15,23,.85); }
-#preview-loading { position: absolute; z-index: 3; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #e1eaf3; background: rgba(3,7,11,.76); box-shadow: 0 5px 20px rgba(0,0,0,.3); font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
-#preview-loading i { width: 11px; height: 11px; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); border-radius: 50%; animation: preview-spin .8s linear infinite; }
+.media-loading { position: absolute; z-index: 3; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #e1eaf3; background: rgba(3,7,11,.76); box-shadow: 0 5px 20px rgba(0,0,0,.3); font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.media-loading i { width: 11px; height: 11px; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); border-radius: 50%; animation: preview-spin .8s linear infinite; }
 @keyframes preview-spin { to { transform: rotate(360deg); } }
 
 #preview-copy { min-width: 0; padding: 5px 0 10px; overflow: visible; }
@@ -109,5 +106,5 @@ kbd { padding: 1px 4px; border: 1px solid #485260; border-radius: 3px; color: #c
 @media (prefers-reduced-motion: reduce) {
   #guide-scroll { scroll-behavior: auto; }
   .program { transition: none; }
-  #preview-loading i { animation: none; }
+  .media-loading i { animation: none; }
 }

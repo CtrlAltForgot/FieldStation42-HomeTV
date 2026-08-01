@@ -4,8 +4,6 @@ import logging
 import mimetypes
 import re
 import time
-import hashlib
-import html
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -20,8 +18,12 @@ from fs42.hometv import (
 )
 from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
-from fs42.metadata_enrichment import MetadataEnricher, artwork_root
-from fs42.live_news import artwork_svg, now_payload as live_now_payload, station_source
+from fs42.metadata_enrichment import MetadataEnricher, _episode_identity, artwork_root
+from fs42.live_news import (
+    artwork_svg, discover_live_video, discover_official_hls,
+    now_payload as live_now_payload,
+    station_source,
+)
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
 LOG = logging.getLogger("myHomeTV.Client")
@@ -31,24 +33,12 @@ PLAYLIST_READY_SEGMENTS = 1
 PLAYLIST_READY_ATTEMPTS = 300
 
 
-def _series_placeholder(title: str) -> str:
-    """A stable series-specific card; never fall back to a channel number."""
-    safe = html.escape(title or "Program")
-    digest = hashlib.sha256(safe.casefold().encode()).hexdigest()
-    hue = int(digest[:4], 16) % 360
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-    <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="hsl({hue} 58% 38%)"/><stop offset="1" stop-color="#07111d"/></linearGradient></defs>
-    <rect width="1280" height="720" fill="url(#g)"/><circle cx="1040" cy="160" r="390" fill="#fff" opacity=".06"/>
-    <path d="M0 610 Q320 470 640 610 T1280 610 V720 H0Z" fill="#000" opacity=".2"/>
-    <text x="76" y="325" fill="#8feaff" font-family="sans-serif" font-size="28" font-weight="700" letter-spacing="6">SERIES</text>
-    <text x="76" y="420" fill="white" font-family="sans-serif" font-size="68" font-weight="700">{safe}</text></svg>'''
-
-
 class SessionRequest(BaseModel):
     channel: str
     profile: str = "auto"
     boundary_at: dt.datetime | None = None
     subtitles: str = "auto"
+    refresh_live: bool = False
 
 
 class ClientEvent(BaseModel):
@@ -144,18 +134,17 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
         raise _watch_error(exc)
 
     metadata = MetadataIO.read(str(approved)) or {}
-    requested_time = at or dt.datetime.now()
-    now = dt.datetime.now(tz=requested_time.tzinfo)
-    is_future = requested_time > now + dt.timedelta(seconds=60)
-    if is_future:
-        series_name = str(metadata.get("show_title", "")).strip()
-        if not series_name:
-            parent = approved.parent
-            if re.match(r"(?i)^(?:season[ ._-]*|s)\d+$", parent.name):
-                parent = parent.parent
-            series_name = parent.name
+    identity = _episode_identity(str(approved), metadata)
+    series_name = str(identity.get("series") or metadata.get("show_title", "")).strip()
+    if series_name:
         series_artwork = Path(str(metadata.get("series_artwork_file", ""))).name
-        if not re.fullmatch(r"[a-f0-9]{64}\.jpg", series_artwork):
+        managed_series_art = (artwork_root() / series_artwork).resolve()
+        if not (
+            re.fullmatch(r"[a-f0-9]{64}\.jpg", series_artwork)
+            and managed_series_art.parent == artwork_root()
+            and managed_series_art.is_file()
+            and managed_series_art.stat().st_size
+        ):
             series_artwork = await asyncio.to_thread(
                 MetadataEnricher().ensure_series_artwork,
                 series_name,
@@ -169,6 +158,9 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
                     media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=86400"},
                 )
+        # Episodic airings may only display canonical series art. Never leak
+        # an episode-specific still or a generic channel card into this path.
+        raise HTTPException(503, "Series artwork is still being prepared")
     artwork_file = Path(str(metadata.get("artwork_file", ""))).name
     if artwork_file and re.fullmatch(r"[a-f0-9]{64}\.jpg", artwork_file):
         managed_art = (artwork_root() / artwork_file).resolve()
@@ -213,16 +205,7 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
                 media_type="image/jpeg",
                 headers={"Cache-Control": "private, max-age=86400"},
             )
-    series_name = str(metadata.get("show_title", "")).strip()
-    if not series_name:
-        parent = approved.parent
-        if re.match(r"(?i)^(?:season[ ._-]*|s)\d+$", parent.name):
-            parent = parent.parent
-        series_name = parent.name
-    return Response(
-        _series_placeholder(series_name), media_type="image/svg+xml",
-        headers={"Cache-Control": "private, max-age=86400"},
-    )
+    raise HTTPException(503, "Show-specific artwork is still being prepared")
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -245,12 +228,28 @@ async def create_session(body: SessionRequest, request: Request):
             if not item:
                 raise ValueError("This live-news source is not configured safely")
             timestamp = dt.datetime.now()
+            video_id = await asyncio.to_thread(
+                discover_live_video, station, body.refresh_live
+            )
+            hls_url = None if video_id else await asyncio.to_thread(
+                discover_official_hls, station
+            )
+            if not video_id and not hls_url:
+                raise ProgramNotFound(
+                    "The publisher does not currently expose an embeddable live broadcast"
+                )
+            if hls_url:
+                return {
+                    "session_id": None, "playback_kind": "external_hls",
+                    "playlist_url": hls_url,
+                    "now": live_now_payload(station, timestamp),
+                    "tune_metrics": {"playlist_ready_ms": 0, "shared_broadcast_age_ms": 0},
+                }
             return {
                 "session_id": None,
                 "playback_kind": "embed",
                 "embed_url": (
-                    "/static/live_news_player.html?channel="
-                    + item["youtube_channel_id"]
+                    "/static/live_news_player.html?video=" + video_id
                 ),
                 "now": live_now_payload(station, timestamp),
                 "tune_metrics": {"playlist_ready_ms": 0, "shared_broadcast_age_ms": 0},

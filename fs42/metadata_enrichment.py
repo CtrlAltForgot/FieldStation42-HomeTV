@@ -30,6 +30,11 @@ LEADING_EPISODE_RE = re.compile(
 SEASON_DIR_RE = re.compile(r"(?i)^(?:season[\s._-]*|s)(\d+)$")
 YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 ARTWORK_LOCK = threading.Lock()
+SERIES_INDEX_NAME = "series-index.json"
+
+
+def _series_key(series: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", series.casefold())
 
 
 def artwork_root() -> Path:
@@ -98,6 +103,78 @@ class MetadataEnricher:
         self.db_path = db_path
         self.art_dir = artwork_root()
 
+    @property
+    def series_index_path(self) -> Path:
+        return self.art_dir / SERIES_INDEX_NAME
+
+    def _read_series_index(self) -> dict:
+        try:
+            data = json.loads(self.series_index_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {}
+
+    def series_artwork(self, series: str) -> str | None:
+        """Return a verified managed image for a canonical series identity."""
+        record = self._read_series_index().get(_series_key(series), {})
+        name = Path(str(record.get("file", ""))).name
+        target = self.art_dir / name
+        if re.fullmatch(r"[a-f0-9]{64}\.jpg", name) and target.is_file() and target.stat().st_size:
+            return name
+        # Recognize deterministic series images made by the previous release
+        # and backfill the index without re-extracting them.
+        legacy = hashlib.sha256(
+            f"series-artwork\0{series.casefold().strip()}".encode()
+        ).hexdigest() + ".jpg"
+        target = self.art_dir / legacy
+        if target.is_file() and target.stat().st_size:
+            self._register_series_artwork(series, legacy, "legacy-series-frame")
+            return legacy
+        return None
+
+    def _register_series_artwork(self, series: str, name: str, source: str) -> None:
+        if not _series_key(series) or not re.fullmatch(r"[a-f0-9]{64}\.jpg", Path(name).name):
+            return
+        self.art_dir.mkdir(parents=True, exist_ok=True)
+        with ARTWORK_LOCK:
+            index = self._read_series_index()
+            index[_series_key(series)] = {
+                "series": series.strip(), "file": Path(name).name,
+                "source": source, "updated": dt.datetime.now().isoformat(),
+            }
+            temporary = self.series_index_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(index, indent=2), encoding="utf-8")
+            temporary.replace(self.series_index_path)
+
+    def _cache_local_series_image(self, series: str, media_path: str) -> str | None:
+        media = Path(media_path)
+        season_dir = media.parent
+        series_dir = season_dir.parent if SEASON_DIR_RE.match(season_dir.name) else season_dir
+        candidates = []
+        for directory in (series_dir, season_dir):
+            for stem in ("fanart", "backdrop", "landscape", "poster", "folder", "thumb"):
+                candidates.extend(directory / f"{stem}{ext}" for ext in (".jpg", ".jpeg", ".png", ".webp"))
+        source = next((item for item in candidates if item.is_file() and item.stat().st_size), None)
+        if source is None:
+            return None
+        signature = f"series-local\0{_series_key(series)}\0{source.resolve()}\0{source.stat().st_mtime_ns}"
+        name = hashlib.sha256(signature.encode()).hexdigest() + ".jpg"
+        target = self.art_dir / name
+        self.art_dir.mkdir(parents=True, exist_ok=True)
+        with ARTWORK_LOCK:
+            if not target.is_file():
+                # FFmpeg normalizes PNG/WebP and wide/portrait artwork into a
+                # browser-safe JPEG without ever sourcing another series.
+                subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "fatal", "-i", str(source),
+                     "-frames:v", "1", "-vf", "scale=1280:-2", "-q:v", "3", "-y", str(target)],
+                    check=True, capture_output=True, timeout=30,
+                )
+        if target.is_file() and target.stat().st_size:
+            self._register_series_artwork(series, name, "local-series-image")
+            return name
+        return None
+
     def scan(
         self,
         paths: Iterable[str],
@@ -128,12 +205,40 @@ class MetadataEnricher:
                     existing = json.loads(row[0]) if row[0] else {}
                 except (TypeError, json.JSONDecodeError):
                     existing = {}
+                identity = _episode_identity(path, existing)
+                series = str(identity.get("series") or "").strip()
+                indexed_series_art = self.series_artwork(series) if series else None
+                configured_series_art = Path(
+                    str(existing.get("series_artwork_file", ""))
+                ).name
+                if (
+                    series
+                    and not indexed_series_art
+                    and re.fullmatch(r"[a-f0-9]{64}\.jpg", configured_series_art)
+                    and (self.art_dir / configured_series_art).is_file()
+                ):
+                    self._register_series_artwork(
+                        series, configured_series_art,
+                        str(existing.get("artwork_source") or "cached-metadata"),
+                    )
+                    indexed_series_art = configured_series_art
+                if series and not indexed_series_art:
+                    try:
+                        local_series_art = self._cache_local_series_image(series, path)
+                    except (OSError, subprocess.SubprocessError):
+                        local_series_art = None
+                    if local_series_art:
+                        existing["series_artwork_file"] = local_series_art
+                        existing["artwork_file"] = local_series_art
+                        existing["artwork_source"] = "local-series-image"
+                        indexed_series_art = local_series_art
                 art_exists = bool(
                     existing.get("artwork_file")
                     and (self.art_dir / Path(existing["artwork_file"]).name).is_file()
                 )
                 complete = bool(
                     art_exists
+                    and (not series or indexed_series_art)
                     and (
                         not tmdb_configured
                         or (existing.get("plot") and existing.get("title"))
@@ -145,17 +250,27 @@ class MetadataEnricher:
                 try:
                     enriched = self._enrich(path, existing)
                     enriched = enriched or dict(existing)
-                    if not art_exists and not enriched.get("artwork_file"):
-                        identity = _episode_identity(path, enriched)
+                    identity = _episode_identity(path, enriched)
+                    series = str(identity.get("series") or "").strip()
+                    # Old catalogs may already contain an episode still. That
+                    # must not prevent migration to one canonical, spoiler-safe
+                    # image shared by every airing of the series.
+                    if series:
                         artwork_file = (
-                            self.ensure_series_artwork(identity["series"], path)
-                            if identity.get("series")
-                            else self.ensure_local_artwork(path)
+                            self.series_artwork(series)
+                            or self.ensure_series_artwork(series, path)
                         )
                         if artwork_file:
+                            enriched["series_artwork_file"] = artwork_file
                             enriched["artwork_file"] = artwork_file
-                            if identity.get("series"):
-                                enriched["series_artwork_file"] = artwork_file
+                            enriched["artwork_source"] = str(
+                                enriched.get("metadata_source")
+                                or "representative-series-frame"
+                            )
+                    elif not art_exists and not enriched.get("artwork_file"):
+                        artwork_file = self.ensure_local_artwork(path)
+                        if artwork_file:
+                            enriched["artwork_file"] = artwork_file
                             enriched["artwork_source"] = "video-still"
                 except Exception as exc:
                     LOG.warning("Metadata enrichment failed for %s: %s", path, exc)
@@ -252,7 +367,9 @@ class MetadataEnricher:
         if remote.get("show_title"):
             merged["show_title"] = remote["show_title"]
             merged["original_show_title"] = remote.get("original_show_title", "")
-        if art_url:
+        if art_url and not (
+            series_artwork and merged.get("series_artwork_file")
+        ):
             artwork_file = self._download_artwork(
                 f"series:{remote.get('show_title', path)}" if series_artwork else path,
                 art_url,
@@ -261,6 +378,11 @@ class MetadataEnricher:
                 merged["artwork_file"] = artwork_file
                 if series_artwork:
                     merged["series_artwork_file"] = artwork_file
+                    self._register_series_artwork(
+                        remote.get("show_title") or series,
+                        artwork_file,
+                        remote.get("metadata_source", "tmdb"),
+                    )
         return merged
 
     def _download_artwork(self, media_path: str, url: str) -> str | None:
@@ -327,6 +449,15 @@ class MetadataEnricher:
 
     def ensure_series_artwork(self, series: str, media_path: str) -> str | None:
         """Cache one stable, spoiler-safe representative image per series."""
+        indexed = self.series_artwork(series)
+        if indexed:
+            return indexed
+        try:
+            local_series = self._cache_local_series_image(series, media_path)
+        except (OSError, subprocess.SubprocessError):
+            local_series = None
+        if local_series:
+            return local_series
         name = hashlib.sha256(
             f"series-artwork\0{series.casefold().strip()}".encode()
         ).hexdigest() + ".jpg"
@@ -340,4 +471,7 @@ class MetadataEnricher:
         with ARTWORK_LOCK:
             if not target.is_file():
                 shutil.copyfile(self.art_dir / local_name, target)
-        return name
+        if target.is_file() and target.stat().st_size:
+            self._register_series_artwork(series, name, "representative-series-frame")
+            return name
+        return None

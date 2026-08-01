@@ -5,7 +5,7 @@
   const channelSelect = document.querySelector("#channels");
   const message = document.querySelector("#message");
   const progress = document.querySelector("#progress span");
-  let channels = [], sessionId = null, hls = null, nowInfo = null;
+  let channels = [], sessionId = null, hls = null, nowInfo = null, playbackKind = null;
   let recoveryTimer = null, hlsRecoveryTimer = null;
   let controlsTimer = null, heartbeat = null;
   let boundaryTimer = null;
@@ -88,6 +88,7 @@
         {method: "DELETE", keepalive: true}
       ).catch(() => {});
     }
+    playbackKind = null;
   }
 
   async function attach(url, signal, startAtBeginning = false) {
@@ -258,7 +259,7 @@
     }, delay);
   }
 
-  async function tune(channel, {boundary = false} = {}) {
+  async function tune(channel, {boundary = false, refreshLive = false} = {}) {
     if (tuneAbort) tuneAbort.abort();
     tuneAbort = new AbortController();
     const signal = tuneAbort.signal;
@@ -279,11 +280,13 @@
             channel: String(channel),
             profile: "auto",
             boundary_at: boundaryAt,
-            subtitles: subtitleMode
+            subtitles: subtitleMode,
+            refresh_live: refreshLive
           }),
           signal
         });
       sessionId = result.session_id;
+      playbackKind = result.playback_kind || "local_hls";
       nowInfo = result.now;
       renderNow();
       let playbackStarted;
@@ -304,12 +307,13 @@
       } else {
         playbackStarted = await attach(result.playlist_url, signal, false);
       }
-      if (result.playback_kind !== "embed") applySubtitleMode();
+      const localHls = playbackKind === "local_hls";
+      if (localHls) applySubtitleMode();
       // Playback completion, not wall time, owns item transitions. This late
       // watchdog only recovers a browser that never emits `ended`; it can
       // never truncate buffered commercial frames.
       const boundaryDelay = Number(nowInfo.item_remaining) * 1000 + 30000;
-      if (result.playback_kind !== "embed") boundaryTimer = setTimeout(
+      if (localHls) boundaryTimer = setTimeout(
         () => {
           reportClientEvent(
             "item-end-watchdog",
@@ -324,7 +328,7 @@
           fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
         }
       }, 20000);
-      if (result.playback_kind !== "embed") schedulePrefetch();
+      if (localHls) schedulePrefetch();
       if (playbackStarted) message.textContent = "";
       localStorage.setItem("fs42-channel", String(channel));
     } catch (error) {
@@ -339,7 +343,7 @@
   }
 
   function recover(force = false) {
-    if (isTuning || (!sessionId && !force)) return;
+    if (isTuning || (!sessionId && playbackKind !== "external_hls" && !force)) return;
     if (recoveryTimer) return;
     const delay = Math.min(30000, 3000 * (2 ** Math.min(recoveryAttempts, 3)));
     recoveryAttempts += 1;
@@ -467,6 +471,11 @@
     }
     if (event.origin === window.location.origin && event.data?.type === "myhometv-live-error") {
       message.textContent = "Official stream is temporarily unavailable — retrying…";
+      clearTimeout(recoveryTimer);
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = null;
+        if (channelSelect.value) tune(channelSelect.value, {refreshLive:true});
+      }, 3000);
     }
     if (event.origin === window.location.origin && event.data?.type === "fs42-guide-close") {
       setGuideVisible(false);

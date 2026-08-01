@@ -2,11 +2,12 @@ import datetime as dt
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fs42.hometv import ScheduleResolver
 from fs42.live_news import (
-    SOURCES, artwork_svg, now_payload, schedule_blocks, station_config,
+    DISCOVERY_CACHE, SOURCES, artwork_svg, discover_live_video,
+    discover_official_hls, now_payload, schedule_blocks, station_config,
     station_source,
 )
 from fs42.fs42_server.api.live_news import InstallRequest, install
@@ -52,10 +53,60 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         resolver = ScheduleResolver(FakeStationManager([station]))
         manager = SimpleNamespace(resolver=resolver)
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hls_sessions=manager)))
-        result = await create_session(SessionRequest(channel="20"), request)
+        with patch(
+            "fs42.fs42_server.api.watch.discover_live_video",
+            return_value="ZvdiJUYGBis",
+        ):
+            result = await create_session(SessionRequest(channel="20"), request)
         self.assertEqual(result["playback_kind"], "embed")
         self.assertIsNone(result["session_id"])
-        self.assertIn(SOURCES[0]["youtube_channel_id"], result["embed_url"])
+        self.assertIn("ZvdiJUYGBis", result["embed_url"])
+
+    async def test_session_uses_official_hls_when_youtube_is_not_live(self):
+        station = self.station(SOURCES[1], 21)
+        resolver = ScheduleResolver(FakeStationManager([station]))
+        manager = SimpleNamespace(resolver=resolver)
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hls_sessions=manager)))
+        with (
+            patch("fs42.fs42_server.api.watch.discover_live_video", return_value=None),
+            patch(
+                "fs42.fs42_server.api.watch.discover_official_hls",
+                return_value="https://news.example.cbsivideo.com/index.m3u8",
+            ),
+        ):
+            result = await create_session(SessionRequest(channel="21"), request)
+        self.assertEqual(result["playback_kind"], "external_hls")
+        self.assertIsNone(result["session_id"])
+        self.assertTrue(result["playlist_url"].endswith("index.m3u8"))
+
+    def test_discovers_concrete_video_from_official_live_command(self):
+        station = self.station(SOURCES[-1], 23)
+        response = MagicMock()
+        response.text = (
+            '<script>window[\'ytCommand\'] = {"watchEndpoint":'
+            '{"videoId":"ZvdiJUYGBis"}};</script>'
+        )
+        response.raise_for_status.return_value = None
+        DISCOVERY_CACHE.clear()
+        with (
+            patch("fs42.live_news.requests.get", return_value=response),
+            patch("fs42.live_news._persist_video"),
+        ):
+            self.assertEqual(discover_live_video(station), "ZvdiJUYGBis")
+
+    def test_discovers_only_approved_official_hls_host(self):
+        station = self.station(SOURCES[1], 21)
+        response = MagicMock()
+        response.text = (
+            'https://tracker.example/steal.m3u8 '
+            'https://news.example.cbsivideo.com/index.m3u8'
+        )
+        response.raise_for_status.return_value = None
+        with patch("fs42.live_news.requests.get", return_value=response):
+            self.assertEqual(
+                discover_official_hls(station),
+                "https://news.example.cbsivideo.com/index.m3u8",
+            )
 
     async def test_installer_is_collision_safe_and_idempotent(self):
         ordinary = {"network_name": "Existing", "channel_number": 20, "network_type": "standard"}
@@ -92,6 +143,11 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("scroll.scrollLeft", guide)
         self.assertNotIn("setInterval(() => {\n    const expected", guide)
         self.assertNotIn('id="time-marker"', frame)
+        self.assertNotIn('id="preview-fallback"', frame)
+        self.assertNotIn("_series_placeholder", open(
+            "fs42/fs42_server/api/watch.py", encoding="utf-8"
+        ).read())
+        self.assertIn('id="artwork-loading"', frame)
 
     def test_ad_prefetch_waits_for_media_not_just_manifest(self):
         watch = open("fs42/fs42_server/static/watch.js", encoding="utf-8").read()

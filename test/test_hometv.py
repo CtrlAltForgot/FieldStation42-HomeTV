@@ -1497,6 +1497,29 @@ class ProviderSettingsTests(unittest.TestCase):
 
 
 class MetadataEnrichmentTests(unittest.TestCase):
+    def test_series_artwork_index_persists_real_series_specific_frames(self):
+        class Helper:
+            def is_configured(self): return False
+        with tempfile.TemporaryDirectory() as temp_dir:
+            art_dir = Path(temp_dir) / "art"
+            art_dir.mkdir()
+            local_name = "b" * 64 + ".jpg"
+            (art_dir / local_name).write_bytes(b"real frame")
+            enricher = MetadataEnricher(
+                helper=Helper(), fallback_helper=Helper(), db_path=":memory:"
+            )
+            enricher.art_dir = art_dir
+            with patch.object(enricher, "ensure_local_artwork", return_value=local_name):
+                sponge = enricher.ensure_series_artwork(
+                    "SpongeBob SquarePants", "/media/SpongeBob/S01E01.mkv"
+                )
+            self.assertEqual((art_dir / sponge).read_bytes(), b"real frame")
+            self.assertEqual(
+                enricher.series_artwork("SpongeBob SquarePants"), sponge
+            )
+            index = json.loads((art_dir / "series-index.json").read_text())
+            self.assertEqual(index["spongebobsquarepants"]["file"], sponge)
+
     def test_scan_caches_fallback_artwork_without_tmdb(self):
         class Helper:
             def is_configured(self):
@@ -1537,7 +1560,43 @@ class MetadataEnrichmentTests(unittest.TestCase):
             self.assertTrue(stats["unconfigured"])
             self.assertEqual(stats["updated"], 1)
             self.assertEqual(metadata["artwork_file"], artwork_name)
-            self.assertEqual(metadata["artwork_source"], "video-still")
+            self.assertEqual(metadata["artwork_source"], "representative-series-frame")
+
+    def test_scan_replaces_legacy_episode_still_with_series_artwork(self):
+        class Helper:
+            def is_configured(self): return False
+            def search_tv(self, _title): return None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "meta.db")
+            media_path = os.path.realpath(Path(temp_dir) / "SpongeBob S01E01.mkv")
+            legacy = "a" * 64 + ".jpg"
+            canonical = "b" * 64 + ".jpg"
+            with connect(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE file_meta (path TEXT PRIMARY KEY, meta TEXT, "
+                    "media_type TEXT, last_checked TIMESTAMP)"
+                )
+                connection.execute(
+                    "INSERT INTO file_meta(path, meta, media_type) VALUES (?, ?, 'video')",
+                    (media_path, json.dumps({"type": "episode", "artwork_file": legacy})),
+                )
+            enricher = MetadataEnricher(
+                helper=Helper(), fallback_helper=Helper(), db_path=db_path
+            )
+            enricher.art_dir = Path(temp_dir) / "art"
+            enricher.art_dir.mkdir()
+            (enricher.art_dir / legacy).write_bytes(b"old episode still")
+            with patch.object(
+                enricher, "ensure_series_artwork", return_value=canonical
+            ):
+                enricher.scan([media_path])
+            with connect(db_path) as connection:
+                metadata = json.loads(connection.execute(
+                    "SELECT meta FROM file_meta WHERE path=?", (media_path,)
+                ).fetchone()[0])
+            self.assertEqual(metadata["series_artwork_file"], canonical)
+            self.assertEqual(metadata["artwork_file"], canonical)
 
     def test_local_still_is_extracted_once_and_reused_without_tmdb(self):
         class Helper:

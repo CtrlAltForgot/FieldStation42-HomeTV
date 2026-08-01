@@ -8,7 +8,7 @@
     stations: [], rows: [], rowIndex: 0, blockIndex: 0,
     start: null, end: null, selected: null,
     previewTimer: null, previewSession: null, hls: null,
-    requestToken: 0, autoFollowNow: true,
+    requestToken: 0, artworkToken: 0, artworkBlobUrl: null, autoFollowNow: true,
     previewEnabled: localStorage.getItem("fs42-guide-preview") !== "false",
     previewActive: !["watch", "compact"].includes(
       new URLSearchParams(window.location.search).get("embedded") ||
@@ -249,7 +249,6 @@
     const now = new Date();
     const live = start <= now && end > now;
     const meta = block.meta || {};
-    $("#preview-channel").textContent = text(station.channel_number, "—");
     const airingLabel = block.airing_kind === "premiere" ? "NEW" : block.airing_kind === "rerun" ? "RERUN" : "";
     $("#preview-kicker").textContent = `${live ? "ON NOW" : "UPCOMING"}${airingLabel ? ` · ${airingLabel}` : ""} · CH ${text(station.channel_number, "—")} · ${text(station.network_long_name || station.network_name)}`;
     $("#preview-title").textContent = programTitle(block);
@@ -267,10 +266,42 @@
     updateProgress();
     art.hidden = true;
     art.removeAttribute("src");
-    $("#preview-fallback").hidden = false;
-    art.onload = () => { art.hidden = false; $("#preview-fallback").hidden = true; };
-    art.onerror = () => { art.hidden = true; $("#preview-fallback").hidden = false; };
-    art.src = `/api/watch/channels/${encodeURIComponent(station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
+    loadPreviewArtwork(station, block);
+  }
+
+  async function loadPreviewArtwork(station, block) {
+    const token = ++state.artworkToken;
+    if (state.artworkBlobUrl) URL.revokeObjectURL(state.artworkBlobUrl);
+    state.artworkBlobUrl = null;
+    art.hidden = true;
+    $("#artwork-loading").hidden = false;
+    $("#artwork-loading span").textContent = "Artwork loading";
+    const url = `/api/watch/channels/${encodeURIComponent(station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const response = await fetch(url, {cache: attempt ? "reload" : "default"});
+        if (!response.ok) throw new Error(`Artwork request failed (${response.status})`);
+        const blobUrl = URL.createObjectURL(await response.blob());
+        await new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = resolve; image.onerror = reject; image.src = blobUrl;
+        });
+        if (token !== state.artworkToken) { URL.revokeObjectURL(blobUrl); return; }
+        state.artworkBlobUrl = blobUrl;
+        art.src = blobUrl;
+        art.hidden = false;
+        $("#artwork-loading").hidden = true;
+        return;
+      } catch (error) {
+        if (token !== state.artworkToken) return;
+        if (attempt === 3) {
+          console.error("Show-specific artwork unavailable", error);
+          $("#artwork-loading span").textContent = "Preparing show artwork";
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
   }
 
   function updateProgress() {
@@ -322,7 +353,6 @@
         frame.hidden = false;
         video.hidden = true;
         art.hidden = true;
-        $("#preview-fallback").hidden = true;
         $("#preview-loading").hidden = true;
         return;
       }
@@ -330,7 +360,6 @@
         if (token !== state.requestToken) return;
         video.hidden = false;
         art.hidden = true;
-        $("#preview-fallback").hidden = true;
         $("#preview-loading").hidden = true;
       };
       video.addEventListener("playing", showVideo, {once: true});
@@ -484,6 +513,12 @@
   $("#now-button").addEventListener("click", returnToNow);
   window.addEventListener("message", event => {
     if (event.origin !== window.location.origin) return;
+    if (event.data?.type === "myhometv-live-error") {
+      const frame = $("#preview-live-news");
+      if (frame) frame.hidden = true;
+      if (art.src) art.hidden = false;
+      $("#preview-loading").hidden = true;
+    }
     if (event.data?.type === "fs42-guide-hidden") { state.previewActive = false; stopPreview(); }
     if (event.data?.type === "fs42-guide-shown") { state.previewActive = true; scheduleLivePreview(); }
   });

@@ -5,9 +5,22 @@ from __future__ import annotations
 import datetime as dt
 import html
 import re
+import json
+import logging
+import os
+import threading
+import time
+import urllib.parse
+from pathlib import Path
+
+import requests
 
 
 CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{20,30}$")
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+DISCOVERY_LOCK = threading.Lock()
+DISCOVERY_CACHE: dict[str, tuple[float, str]] = {}
+LOG = logging.getLogger("LiveNews")
 
 # These are official publisher-operated YouTube channels.  We intentionally
 # embed the publisher's live player instead of discovering or restreaming its
@@ -18,7 +31,8 @@ SOURCES = (
      "official_url": "https://abcnews.go.com/Live"},
     {"id": "cbs-news-247", "name": "CBS News 24/7", "channel": 21,
      "youtube_channel_id": "UC8p1vwvWtl6T73JiExfWs1g", "color": "#1769c2",
-     "official_url": "https://www.cbsnews.com/streaming/"},
+     "official_url": "https://www.cbsnews.com/streaming/",
+     "hls_discovery_url": "https://www.cbsnews.com/live/"},
     {"id": "nbc-news-now", "name": "NBC News NOW", "channel": 22,
      "youtube_channel_id": "UCeY0bbntWzzVIaj2z3QigXg", "color": "#6046d7",
      "official_url": "https://www.nbcnews.com/now"},
@@ -41,6 +55,94 @@ def station_source(station: dict) -> dict | None:
     if item and CHANNEL_ID_RE.fullmatch(channel_id):
         item.update(configured)
         return item
+    return None
+
+
+def _live_cache_path() -> Path:
+    return Path(os.environ.get("FS42_LIVE_NEWS_CACHE", "runtime/live-news-sources.json"))
+
+
+def _persist_video(source_id: str, video_id: str) -> None:
+    path = _live_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data[source_id] = {"video_id": video_id, "checked": time.time()}
+    temporary = path.with_suffix(".tmp")
+    try:
+        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        LOG.info("Could not persist live source cache: %s", exc)
+
+
+def discover_live_video(station: dict, force: bool = False) -> str | None:
+    """Resolve the publisher's /live page to its current concrete video ID."""
+    item = station_source(station)
+    if not item:
+        return None
+    source_id = item["id"]
+    with DISCOVERY_LOCK:
+        cached = DISCOVERY_CACHE.get(source_id)
+        if cached and not force and time.monotonic() - cached[0] < 120:
+            return cached[1]
+        try:
+            response = requests.get(
+                f"https://www.youtube.com/channel/{item['youtube_channel_id']}/live",
+                headers={"Accept-Language": "en-US,en;q=0.8", "User-Agent": "Mozilla/5.0 myHomeTV/1.0"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            # The page's initial navigation command identifies the actual live
+            # broadcast. Other videoId values later in the response are merely
+            # recommendations and must never be selected.
+            command = re.search(
+                r"window\[['\"]ytCommand['\"]\]\s*=\s*(\{.*?\});",
+                response.text,
+            )
+            match = re.search(
+                r'"watchEndpoint"\s*:\s*\{\s*"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"',
+                command.group(1) if command else "",
+            )
+            if not match:
+                LOG.warning("No current YouTube live broadcast found for %s", source_id)
+                return None
+            video_id = match.group(1)
+            DISCOVERY_CACHE[source_id] = (time.monotonic(), video_id)
+            try:
+                _persist_video(source_id, video_id)
+            except OSError as exc:
+                # Persistence is an optimization; a read-only development
+                # runtime must never discard a successfully discovered feed.
+                LOG.info("Could not persist live source cache: %s", exc)
+            return video_id
+        except Exception as exc:
+            LOG.warning("Live broadcast discovery failed for %s: %s", source_id, exc)
+            return None
+
+
+def discover_official_hls(station: dict) -> str | None:
+    """Find a CORS-enabled HLS URL published in an approved official page."""
+    item = station_source(station)
+    page = str((item or {}).get("hls_discovery_url", ""))
+    if not page:
+        return None
+    try:
+        response = requests.get(
+            page, headers={"User-Agent": "Mozilla/5.0 myHomeTV/1.0"}, timeout=10
+        )
+        response.raise_for_status()
+        candidates = re.findall(r'https://[^"\s\\]+?\.m3u8(?:\?[^"\s\\]*)?', response.text)
+        approved_suffixes = (".cbsivideo.com", ".google.com")
+        for candidate in candidates:
+            url = html.unescape(candidate).replace("\\/", "/")
+            host = (urllib.parse.urlparse(url).hostname or "").casefold()
+            if any(host.endswith(suffix) for suffix in approved_suffixes):
+                return url
+    except Exception as exc:
+        LOG.warning("Official HLS discovery failed for %s: %s", item.get("id"), exc)
     return None
 
 
