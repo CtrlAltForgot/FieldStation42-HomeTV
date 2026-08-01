@@ -1497,6 +1497,62 @@ class ProviderSettingsTests(unittest.TestCase):
 
 
 class MetadataEnrichmentTests(unittest.TestCase):
+    def test_series_index_never_crosses_spongebob_and_blacklist_artwork(self):
+        class Helper:
+            def is_configured(self): return False
+        with tempfile.TemporaryDirectory() as temp_dir:
+            art_dir = Path(temp_dir) / "art"
+            art_dir.mkdir()
+            sponge_frame = "a" * 64 + ".jpg"
+            blacklist_frame = "b" * 64 + ".jpg"
+            (art_dir / sponge_frame).write_bytes(b"spongebob frame")
+            (art_dir / blacklist_frame).write_bytes(b"blacklist frame")
+            enricher = MetadataEnricher(
+                helper=Helper(), fallback_helper=Helper(), db_path=":memory:"
+            )
+            enricher.art_dir = art_dir
+            with patch.object(
+                enricher, "ensure_local_artwork",
+                side_effect=[sponge_frame, blacklist_frame],
+            ):
+                sponge = enricher.ensure_series_artwork(
+                    "SpongeBob SquarePants", "/media/SpongeBob/S01E01.mkv"
+                )
+                blacklist = enricher.ensure_series_artwork(
+                    "The Blacklist", "/media/The Blacklist/S01E01.mkv"
+                )
+            self.assertNotEqual(sponge, blacklist)
+            self.assertEqual((art_dir / sponge).read_bytes(), b"spongebob frame")
+            self.assertEqual((art_dir / blacklist).read_bytes(), b"blacklist frame")
+            self.assertEqual(enricher.series_artwork("The Blacklist"), blacklist)
+
+    def test_concurrent_series_index_writes_preserve_both_shows(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        class Helper:
+            def is_configured(self): return False
+        with tempfile.TemporaryDirectory() as temp_dir:
+            art_dir = Path(temp_dir) / "art"
+            art_dir.mkdir()
+            first = "c" * 64 + ".jpg"
+            second = "d" * 64 + ".jpg"
+            (art_dir / first).write_bytes(b"first")
+            (art_dir / second).write_bytes(b"second")
+            enricher = MetadataEnricher(
+                helper=Helper(), fallback_helper=Helper(), db_path=":memory:"
+            )
+            enricher.art_dir = art_dir
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(
+                    lambda values: enricher._register_series_artwork(*values),
+                    [
+                        ("SpongeBob SquarePants", first, "test"),
+                        ("The Blacklist", second, "test"),
+                    ],
+                ))
+            self.assertEqual(enricher.series_artwork("SpongeBob SquarePants"), first)
+            self.assertEqual(enricher.series_artwork("The Blacklist"), second)
+
     def test_series_artwork_index_persists_real_series_specific_frames(self):
         class Helper:
             def is_configured(self): return False
