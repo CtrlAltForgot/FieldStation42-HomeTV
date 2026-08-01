@@ -17,7 +17,7 @@ from fs42.hometv import (
 )
 from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
-from fs42.metadata_enrichment import artwork_root
+from fs42.metadata_enrichment import MetadataEnricher, artwork_root
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
 LOG = logging.getLogger("myHomeTV.Client")
@@ -146,6 +146,21 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
                 resolved,
                 media_type=media_type or "image/jpeg",
                 headers={"Cache-Control": "private, max-age=3600"},
+            )
+
+    # A local frame guarantees useful guide art even when online metadata is
+    # unavailable or has not completed yet. Extraction is lazy and cached, and
+    # runs off the event loop so other guide/API requests remain responsive.
+    artwork_file = await asyncio.to_thread(
+        MetadataEnricher().ensure_local_artwork, str(approved)
+    )
+    if artwork_file:
+        managed_art = (artwork_root() / artwork_file).resolve()
+        if managed_art.parent == artwork_root() and managed_art.is_file():
+            return FileResponse(
+                managed_art,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "private, max-age=86400"},
             )
     raise HTTPException(404, "No local artwork is available for this program")
 

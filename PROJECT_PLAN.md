@@ -66,6 +66,11 @@ Commit `4b8e1cc` added:
 Movies must never display season or episode information. Episode summaries use
 the compact form `S1E1: Episode title` rather than verbose season/episode text.
 
+Guide artwork must not depend exclusively on TMDB. Every scheduled video needs
+a persistent cached still extracted from the media as a fallback, created
+incrementally during scans/rebuilds and lazily on first guide access. The
+channel-number card is reserved for genuinely unreadable or missing media.
+
 ### myHomeTV rebrand
 
 Commit `bcc8ae6` changed the user-facing product name from FieldStation42 to
@@ -153,4 +158,3 @@ Verify in this order:
   and automatically select full-dialogue English subtitles for foreign audio.
 - Preserve user data and provide rollback behavior for deployment migrations.
 - Run the full HomeTV and Unraid deployment test suites before every release.
-

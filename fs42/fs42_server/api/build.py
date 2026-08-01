@@ -54,8 +54,7 @@ def _feature_paths(stations):
 
 def _scan_metadata(stations, log, force=False):
     enricher = MetadataEnricher()
-    paths = _feature_paths(stations) if enricher.helper.is_configured() else []
-    enricher.scan(paths, force=force, log=log)
+    enricher.scan(_feature_paths(stations), force=force, log=log)
 
 
 @router.post("/quick/{action}/{network_name}")

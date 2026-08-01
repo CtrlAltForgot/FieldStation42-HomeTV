@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import threading
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -26,6 +28,7 @@ LEADING_EPISODE_RE = re.compile(
 )
 SEASON_DIR_RE = re.compile(r"(?i)^(?:season[\s._-]*|s)(\d+)$")
 YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+ARTWORK_LOCK = threading.Lock()
 
 
 def artwork_root() -> Path:
@@ -99,10 +102,13 @@ class MetadataEnricher:
         report = log or (lambda message: LOG.info(message))
         unique_paths = list(dict.fromkeys(os.path.realpath(path) for path in paths))
         stats = {"total": len(unique_paths), "updated": 0, "skipped": 0, "unmatched": 0}
-        if not self.helper.is_configured():
-            report("TMDB is not configured. Set TMDB_API_KEY and restart myHomeTV.")
+        tmdb_configured = self.helper.is_configured()
+        if not tmdb_configured:
+            report(
+                "TMDB is not configured; caching local video stills without "
+                "online descriptions."
+            )
             stats["unconfigured"] = True
-            return stats
         self.art_dir.mkdir(parents=True, exist_ok=True)
         report(f"Scanning metadata for {len(unique_paths)} catalog features.")
         with connect(self.db_path) as connection:
@@ -122,15 +128,27 @@ class MetadataEnricher:
                     and (self.art_dir / Path(existing["artwork_file"]).name).is_file()
                 )
                 complete = bool(
-                    existing.get("plot")
-                    and existing.get("title")
-                    and art_exists
+                    art_exists
+                    and (
+                        not tmdb_configured
+                        or (existing.get("plot") and existing.get("title"))
+                    )
                 )
                 if complete and not force:
                     stats["skipped"] += 1
                     continue
                 try:
-                    enriched = self._enrich(path, existing)
+                    enriched = (
+                        self._enrich(path, existing)
+                        if tmdb_configured
+                        else dict(existing)
+                    )
+                    enriched = enriched or dict(existing)
+                    if not art_exists and not enriched.get("artwork_file"):
+                        artwork_file = self.ensure_local_artwork(path)
+                        if artwork_file:
+                            enriched["artwork_file"] = artwork_file
+                            enriched["artwork_source"] = "video-still"
                 except Exception as exc:
                     LOG.warning("Metadata enrichment failed for %s: %s", path, exc)
                     stats["unmatched"] += 1
@@ -243,3 +261,42 @@ class MetadataEnricher:
             LOG.warning("Could not cache artwork for %s: %s", media_path, exc)
             temporary.unlink(missing_ok=True)
             return None
+
+    def ensure_local_artwork(self, media_path: str) -> str | None:
+        """Return a persistent cached still, extracting it only when missing."""
+        try:
+            source = Path(media_path).resolve(strict=True)
+            stat = source.stat()
+        except (FileNotFoundError, OSError):
+            return None
+        signature = f"{source}\0video-still\0{stat.st_size}\0{stat.st_mtime_ns}"
+        name = hashlib.sha256(signature.encode()).hexdigest() + ".jpg"
+        self.art_dir.mkdir(parents=True, exist_ok=True)
+        target = self.art_dir / name
+        if target.is_file() and target.stat().st_size:
+            return name
+
+        with ARTWORK_LOCK:
+            if target.is_file() and target.stat().st_size:
+                return name
+            temporary = self.art_dir / f"{target.stem}.tmp.jpg"
+            for seek in ("10", "1"):
+                try:
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            "-ss", seek, "-i", str(source), "-frames:v", "1",
+                            "-vf", "scale=1280:-2", "-q:v", "3", "-y",
+                            str(temporary),
+                        ],
+                        check=True,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    if temporary.is_file() and temporary.stat().st_size:
+                        temporary.replace(target)
+                        return name
+                except (OSError, subprocess.SubprocessError):
+                    temporary.unlink(missing_ok=True)
+        LOG.warning("Could not extract cached artwork from %s", media_path)
+        return None

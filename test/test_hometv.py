@@ -934,6 +934,71 @@ class DatabaseTests(unittest.TestCase):
 
 
 class MetadataEnrichmentTests(unittest.TestCase):
+    def test_scan_caches_fallback_artwork_without_tmdb(self):
+        class Helper:
+            def is_configured(self):
+                return False
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "meta.db")
+            media_path = os.path.realpath(Path(temp_dir) / "Show S01E01.mkv")
+            with connect(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE file_meta (path TEXT PRIMARY KEY, meta TEXT, "
+                    "media_type TEXT, last_checked TIMESTAMP)"
+                )
+                connection.execute(
+                    "INSERT INTO file_meta(path, meta, media_type) "
+                    "VALUES (?, '{}', 'video')",
+                    (media_path,),
+                )
+            enricher = MetadataEnricher(helper=Helper(), db_path=db_path)
+            enricher.art_dir = Path(temp_dir) / "art"
+            artwork_name = "a" * 64 + ".jpg"
+            with patch.object(
+                enricher, "ensure_local_artwork", return_value=artwork_name
+            ):
+                stats = enricher.scan([media_path])
+            with connect(db_path) as connection:
+                metadata = json.loads(
+                    connection.execute(
+                        "SELECT meta FROM file_meta WHERE path=?", (media_path,)
+                    ).fetchone()[0]
+                )
+            self.assertTrue(stats["unconfigured"])
+            self.assertEqual(stats["updated"], 1)
+            self.assertEqual(metadata["artwork_file"], artwork_name)
+            self.assertEqual(metadata["artwork_source"], "video-still")
+
+    def test_local_still_is_extracted_once_and_reused_without_tmdb(self):
+        class Helper:
+            def is_configured(self):
+                return False
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "Show S01E01.mkv"
+            media.write_bytes(b"video fixture")
+            enricher = MetadataEnricher(
+                helper=Helper(), db_path=str(Path(temp_dir) / "meta.db")
+            )
+            enricher.art_dir = Path(temp_dir) / "art"
+
+            def create_still(command, **_kwargs):
+                Path(command[-1]).write_bytes(b"jpeg fixture")
+                return SimpleNamespace(returncode=0)
+
+            with patch(
+                "fs42.metadata_enrichment.subprocess.run",
+                side_effect=create_still,
+            ) as run:
+                first = enricher.ensure_local_artwork(str(media))
+                second = enricher.ensure_local_artwork(str(media))
+
+            self.assertEqual(first, second)
+            self.assertRegex(first, r"^[a-f0-9]{64}\.jpg$")
+            self.assertEqual((enricher.art_dir / first).read_bytes(), b"jpeg fixture")
+            run.assert_called_once()
+
     def test_episode_scan_uses_english_series_identity_and_episode_details(self):
         class Helper:
             def is_configured(self):
@@ -1144,6 +1209,7 @@ class BuildOperationTests(unittest.TestCase):
             patch("fs42.fs42_server.api.build.StationManager", return_value=manager),
             patch("fs42.fs42_server.api.build.CatalogAPI.delete_catalog"),
             patch("fs42.fs42_server.api.build.ShowCatalog"),
+            patch("fs42.fs42_server.api.build._scan_metadata"),
             patch("fs42.fs42_server.api.build.LiquidManager.reload_schedules"),
             patch("fs42.fs42_server.api.build.LiquidSchedule") as schedule,
         ):
