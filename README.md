@@ -57,7 +57,7 @@ library themselves.
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/CtrlAltForgot/FieldStation42-HomeTV.git
+git clone https://github.com/CtrlAltForgot/myHomeTV.git
 cd FieldStation42-HomeTV
 cp docker/hometv.env.example docker/.env
 ```
