@@ -15,6 +15,7 @@ sys.path.append(parent)
 
 from fs42.station_manager import StationManager
 from fs42.hometv import HLSSessionManager
+from fs42.artwork_preloader import prepare_all_series
 from .api import routers
 
 _shutdown_queue = None
@@ -23,6 +24,7 @@ player_command_queue = None
 @asynccontextmanager
 async def _lifespan(app):
     app.state.hls_sessions = HLSSessionManager()
+    artwork_task = asyncio.create_task(asyncio.to_thread(prepare_all_series))
     cleanup_task = None
     if _shutdown_queue is not None:
         async def shutdown_monitor():
@@ -45,6 +47,7 @@ async def _lifespan(app):
     try:
         yield
     finally:
+        artwork_task.cancel()
         cleanup_task.cancel()
         app.state.hls_sessions.close()
 

@@ -154,6 +154,22 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("Hls.Events.FRAG_BUFFERED", watch)
         self.assertIn("- 20_000", watch)
 
+    def test_guide_preloads_and_decodes_artwork_before_rendering(self):
+        guide = open("fs42/fs42_server/static/guide.js", encoding="utf-8").read()
+        self.assertLess(guide.index("await prewarmArtwork();"), guide.index("render();"))
+        self.assertIn("state.artworkCache.set(key, blobUrl)", guide)
+        self.assertNotIn('textContent = "Artwork loading"', guide)
+
+    def test_live_news_embed_cannot_capture_controls_or_pause(self):
+        player = open(
+            "fs42/fs42_server/static/live_news_player.html", encoding="utf-8"
+        ).read()
+        self.assertIn("pointer-events:none", player)
+        self.assertIn("controls:0", player)
+        self.assertIn("disablekb:1", player)
+        self.assertIn("YT.PlayerState.PAUSED", player)
+        self.assertNotIn("player.pauseVideo()", player)
+
 
 if __name__ == "__main__":
     unittest.main()

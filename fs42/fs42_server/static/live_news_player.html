@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>*{box-sizing:border-box}html,body,#player,#standby{width:100%;height:100%;margin:0;background:#05080c;overflow:hidden}#standby{position:absolute;inset:0;display:grid;place-content:center;text-align:center;color:#dce8f2;font:600 22px system-ui;background:radial-gradient(circle at 50% 35%,#17354d,#05080c 70%)}#standby small{display:block;margin-top:12px;color:#7ee8ff;font-size:14px;letter-spacing:.12em;text-transform:uppercase}.ready #standby{display:none}</style></head>
+<style>*{box-sizing:border-box}html,body,#player,#standby{width:100%;height:100%;margin:0;background:#05080c;overflow:hidden}#player,#player iframe{pointer-events:none!important;user-select:none}#standby{position:absolute;inset:0;display:grid;place-content:center;text-align:center;color:#dce8f2;font:600 22px system-ui;background:radial-gradient(circle at 50% 35%,#17354d,#05080c 70%)}#standby small{display:block;margin-top:12px;color:#7ee8ff;font-size:14px;letter-spacing:.12em;text-transform:uppercase}.ready #standby{display:none}</style></head>
 <body><div id="player"></div><div id="standby">Connecting to the official live stream…<small>myHomeTV live news</small></div>
 <script>
 const id=new URLSearchParams(location.search).get('video')||'';
@@ -7,12 +7,12 @@ const allowed=/^[A-Za-z0-9_-]{11}$/.test(id);
 function tell(type,detail=''){parent.postMessage({type,detail},location.origin)}
 if(allowed){
   let player;
-  window.onYouTubeIframeAPIReady=()=>{player=new YT.Player('player',{videoId:id,width:'100%',height:'100%',playerVars:{autoplay:1,controls:1,playsinline:1,rel:0},events:{
-    onReady:e=>{e.target.mute();e.target.playVideo();tell('myhometv-live-ready')},
-    onStateChange:e=>{if(e.data===YT.PlayerState.PLAYING){document.body.classList.add('ready');tell('myhometv-live-playing')}},
+  window.onYouTubeIframeAPIReady=()=>{player=new YT.Player('player',{videoId:id,width:'100%',height:'100%',playerVars:{autoplay:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,playsinline:1,rel:0},events:{
+    onReady:e=>{e.target.mute();try{e.target.setPlaybackQuality('highres')}catch(_){}e.target.playVideo();tell('myhometv-live-ready')},
+    onStateChange:e=>{if(e.data===YT.PlayerState.PLAYING){try{e.target.setPlaybackQuality('highres')}catch(_){}document.body.classList.add('ready');tell('myhometv-live-playing')}else if(e.data===YT.PlayerState.PAUSED||e.data===YT.PlayerState.CUED){e.target.playVideo()}},
     onError:e=>{document.body.classList.remove('ready');document.querySelector('#standby').firstChild.textContent='Official stream changed — reconnecting…';tell('myhometv-live-error',String(e.data))}
   }})};
   const api=document.createElement('script');api.src='https://www.youtube.com/iframe_api';document.head.append(api);
-  addEventListener('message',e=>{if(e.origin!==location.origin||!player)return;const a=e.data||{};try{if(a.type==='volume'){player.setVolume(Math.round(a.value*100));a.muted?player.mute():player.unMute()}if(a.type==='play')player.playVideo();if(a.type==='pause')player.pauseVideo()}catch(_){}});
+  addEventListener('message',e=>{if(e.origin!==location.origin||!player)return;const a=e.data||{};try{if(a.type==='volume'){player.setVolume(Math.round(a.value*100));a.muted?player.mute():player.unMute()}if(a.type==='play')player.playVideo()}catch(_){}});
 }else{document.querySelector('#standby').firstChild.textContent='This live source is not configured safely.';tell('myhometv-live-error','invalid channel')}
 </script></body></html>

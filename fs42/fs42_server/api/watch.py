@@ -18,6 +18,7 @@ from fs42.hometv import (
 )
 from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
+from fs42.artwork_preloader import status as artwork_preload_status
 from fs42.metadata_enrichment import MetadataEnricher, _episode_identity, artwork_root
 from fs42.live_news import (
     artwork_svg, discover_live_video, discover_official_hls,
@@ -31,6 +32,11 @@ PLAYLIST_STARTUP_ATTEMPTS = 200
 PLAYLIST_STARTUP_INTERVAL = 0.1
 PLAYLIST_READY_SEGMENTS = 1
 PLAYLIST_READY_ATTEMPTS = 300
+
+
+@router.get("/artwork-status")
+async def artwork_status():
+    return artwork_preload_status()
 
 
 class SessionRequest(BaseModel):

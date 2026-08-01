@@ -1497,6 +1497,34 @@ class ProviderSettingsTests(unittest.TestCase):
 
 
 class MetadataEnrichmentTests(unittest.TestCase):
+    def test_startup_preloader_caches_each_series_once(self):
+        from fs42 import artwork_preloader
+
+        entries = [
+            SimpleNamespace(path="/tv/SpongeBob/S01E01.mkv", media_type="video", content_type="feature"),
+            SimpleNamespace(path="/tv/SpongeBob/S01E02.mkv", media_type="video", content_type="feature"),
+            SimpleNamespace(path="/tv/The Blacklist/S01E01.mkv", media_type="video", content_type="feature"),
+        ]
+        stations = [{"_has_catalog": True}]
+        warmed = []
+        fake_enricher = SimpleNamespace(
+            ensure_series_artwork=lambda series, path: warmed.append((series, path)) or "art.jpg"
+        )
+        def metadata(path):
+            return {"type": "episode", "show_title": (
+                "SpongeBob SquarePants" if "SpongeBob" in path else "The Blacklist"
+            )}
+        with (
+            patch.object(artwork_preloader, "StationManager", return_value=SimpleNamespace(stations=stations)),
+            patch.object(artwork_preloader.CatalogAPI, "get_entries", return_value=entries),
+            patch.object(artwork_preloader.MetadataIO, "read", side_effect=metadata),
+            patch.object(artwork_preloader, "MetadataEnricher", return_value=fake_enricher),
+        ):
+            result = artwork_preloader.prepare_all_series()
+        self.assertEqual(result["state"], "ready")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(warmed), 2)
+
     def test_series_index_never_crosses_spongebob_and_blacklist_artwork(self):
         class Helper:
             def is_configured(self): return False

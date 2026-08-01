@@ -305,6 +305,22 @@ Verify in this order:
 - Preserve user data and provide rollback behavior for deployment migrations.
 - Run the full HomeTV and Unraid deployment test suites before every release.
 
+## Active always-ready artwork goal (2026-08-01)
+
+- At server startup, enumerate every catalog once and ensure one persistent,
+  canonical image exists for each episodic series. Repeat the same incremental
+  backfill automatically after catalog rebuilds.
+- Before the guide reveals its listings, group the full visible window by
+  canonical program identity, fetch each unique image with bounded concurrency,
+  and wait for the browser to decode it. Selection then swaps to an already
+  decoded in-memory image with no normal-state loading card or spinner.
+- Retain HTTP caching across guide visits and an in-memory decoded cache for the
+  current guide session. Incremental future guide coverage must be warmed before
+  it becomes browsable.
+- Expose server preload progress/readiness for diagnostics. A clearly labeled
+  unavailable state is allowed only when the program's source media and every
+  approved metadata/local-art source are genuinely unusable.
+
 ## Active live-news release (2026-08-01)
 
 - Add an idempotent one-click main-page installer for official, freely
@@ -339,3 +355,8 @@ Verify in this order:
   commercial-free. Keep 50-minute episodes eligible for restrained breaks,
   but cap the total filler added to any shorter program so schedule rounding
   cannot create an excessive ad pod.
+- Treat official YouTube news embeds as non-interactive video surfaces beneath
+  myHomeTV: disable native controls and keyboard input, block pointer capture,
+  automatically resume an unexpected pause, and request the highest available
+  quality. myHomeTV remains the only interactive overlay while preserving any
+  publisher branding required by the official player.

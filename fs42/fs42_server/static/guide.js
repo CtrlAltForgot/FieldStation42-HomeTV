@@ -8,7 +8,8 @@
     stations: [], rows: [], rowIndex: 0, blockIndex: 0,
     start: null, end: null, selected: null,
     previewTimer: null, previewSession: null, hls: null,
-    requestToken: 0, artworkToken: 0, artworkBlobUrl: null, autoFollowNow: true,
+    requestToken: 0, artworkToken: 0,
+    artworkCache: new Map(), artworkFailures: new Set(), autoFollowNow: true,
     previewEnabled: localStorage.getItem("fs42-guide-preview") !== "false",
     previewActive: !["watch", "compact"].includes(
       new URLSearchParams(window.location.search).get("embedded") ||
@@ -86,21 +87,64 @@
       })));
       state.rows.push(...batch);
     }
+    state.rows.forEach(row => {
+      row.visibleBlocks = row.blocks.filter(block => {
+        const start = new Date(block.start_time);
+        const end = new Date(block.end_time);
+        return end > state.start && start < state.end;
+      });
+    });
+    await prewarmArtwork();
     render();
     selectInitial();
-    prewarmArtwork();
     $("#guide-message").hidden = true;
   }
 
-  function prewarmArtwork() {
-    const now = new Date();
-    state.rows.forEach(row => {
-      const candidates = row.visibleBlocks.filter(block => new Date(block.end_time) > now).slice(0, 2);
-      candidates.forEach(block => {
+  function artworkKey(station, block) {
+    if (station.is_live_source) return `live:${station.channel_number}`;
+    const meta = block.meta || {};
+    const kind = String(meta.type || "program").toLocaleLowerCase();
+    const series = meta.show_title || block.display_title || block.title || "";
+    return `${kind}:${String(series).toLocaleLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}]+/gu, "")}`;
+  }
+
+  function artworkUrl(station, block) {
+    return `/api/watch/channels/${encodeURIComponent(station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
+  }
+
+  async function cacheArtwork(key, url) {
+    if (state.artworkCache.has(key)) return;
+    const response = await fetch(url, {cache: "force-cache"});
+    if (!response.ok) throw new Error(`Artwork request failed (${response.status})`);
+    const blobUrl = URL.createObjectURL(await response.blob());
+    try {
+      await new Promise((resolve, reject) => {
         const image = new Image();
-        image.src = `/api/watch/channels/${encodeURIComponent(row.station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
+        image.onload = resolve; image.onerror = reject; image.src = blobUrl;
       });
-    });
+      state.artworkCache.set(key, blobUrl);
+    } catch (error) {
+      URL.revokeObjectURL(blobUrl);
+      throw error;
+    }
+  }
+
+  async function prewarmArtwork() {
+    const jobs = new Map();
+    state.rows.forEach(row => row.visibleBlocks.forEach(block => {
+      const key = artworkKey(row.station, block);
+      if (!jobs.has(key)) jobs.set(key, artworkUrl(row.station, block));
+    }));
+    const pending = [...jobs].filter(([key]) => !state.artworkCache.has(key));
+    let complete = 0;
+    for (let index = 0; index < pending.length; index += 6) {
+      await Promise.all(pending.slice(index, index + 6).map(async ([key, url]) => {
+        try { await cacheArtwork(key, url); }
+        catch (error) { state.artworkFailures.add(key); console.error("Artwork preload failed", key, error); }
+        complete += 1;
+        $("#guide-message").textContent = `Preparing guide artwork ${complete}/${pending.length}…`;
+      }));
+    }
   }
 
   function renderTimeline() {
@@ -143,11 +187,6 @@
       channel.append(number, name);
       const track = document.createElement("div");
       track.className = "program-track";
-      row.visibleBlocks = row.blocks.filter(block => {
-        const start = new Date(block.start_time);
-        const end = new Date(block.end_time);
-        return end > state.start && start < state.end;
-      });
       row.visibleBlocks.forEach((block, blockIndex) => {
         const start = new Date(block.start_time);
         const end = new Date(block.end_time);
@@ -271,37 +310,27 @@
 
   async function loadPreviewArtwork(station, block) {
     const token = ++state.artworkToken;
-    if (state.artworkBlobUrl) URL.revokeObjectURL(state.artworkBlobUrl);
-    state.artworkBlobUrl = null;
     art.hidden = true;
-    $("#artwork-loading").hidden = false;
-    $("#artwork-loading span").textContent = "Artwork loading";
-    const url = `/api/watch/channels/${encodeURIComponent(station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    const key = artworkKey(station, block);
+    let blobUrl = state.artworkCache.get(key);
+    if (!blobUrl && !state.artworkFailures.has(key)) {
       try {
-        const response = await fetch(url, {cache: attempt ? "reload" : "default"});
-        if (!response.ok) throw new Error(`Artwork request failed (${response.status})`);
-        const blobUrl = URL.createObjectURL(await response.blob());
-        await new Promise((resolve, reject) => {
-          const image = new Image();
-          image.onload = resolve; image.onerror = reject; image.src = blobUrl;
-        });
-        if (token !== state.artworkToken) { URL.revokeObjectURL(blobUrl); return; }
-        state.artworkBlobUrl = blobUrl;
-        art.src = blobUrl;
-        art.hidden = false;
-        $("#artwork-loading").hidden = true;
-        return;
+        await cacheArtwork(key, artworkUrl(station, block));
+        blobUrl = state.artworkCache.get(key);
       } catch (error) {
-        if (token !== state.artworkToken) return;
-        if (attempt === 3) {
-          console.error("Show-specific artwork unavailable", error);
-          $("#artwork-loading span").textContent = "Preparing show artwork";
-          return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+        state.artworkFailures.add(key);
+        console.error("Show-specific artwork unavailable", error);
       }
     }
+    if (token !== state.artworkToken) return;
+    if (blobUrl) {
+      art.src = blobUrl;
+      art.hidden = false;
+      $("#artwork-loading").hidden = true;
+      return;
+    }
+    $("#artwork-loading").hidden = false;
+    $("#artwork-loading span").textContent = "Artwork unavailable";
   }
 
   function updateProgress() {
