@@ -355,7 +355,7 @@ class LiveNewsStaticContractTests(unittest.TestCase):
     def test_roku_guide_overlays_video_and_hud_auto_hides_in_blue(self):
         roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
         scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
-        self.assertLess(scene.index('id="video"'), scene.index('id="guideLayer"'))
+        self.assertLess(scene.index('id="videoA"'), scene.index('id="guideLayer"'))
         self.assertIn('color="#07111DCC"', scene)
         self.assertIn('color="#07111DE8"', scene)
         self.assertIn("m.hudTimer.duration = 6", roku)
@@ -369,6 +369,19 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("m.currentProgram = closestProgramIndex(m.currentChannel, m.nowPixel)", roku)
         self.assertIn('m.guideLayer.visible = true', roku)
         self.assertIn('m.guideLayer.visible = false', roku)
+
+    def test_roku_channel_changes_are_double_buffered_and_guide_wraps(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
+        self.assertIn('id="videoA"', scene)
+        self.assertIn('id="videoB"', scene)
+        self.assertIn('if state = "playing"', roku)
+        self.assertIn("finishBufferedTune(which, node)", roku)
+        tune = roku[roku.index("sub tuneCurrentChannel()"):
+                    roku.index("sub onPlaybackReady")]
+        self.assertNotIn("stopPlayback()", tune)
+        self.assertIn("if m.currentChannel < 0 then m.currentChannel = m.rows.Count() - 1", roku)
+        self.assertIn("if m.currentChannel >= m.rows.Count() then m.currentChannel = 0", roku)
 
     def test_tv_client_packages_have_required_manifests(self):
         manifest = open("clients/roku/manifest", encoding="utf-8").read()

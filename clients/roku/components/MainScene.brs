@@ -2,9 +2,16 @@ sub init()
     m.server = "http://192.168.1.254:4243"
     registry = CreateObject("roRegistrySection", "myHomeTV")
     if registry.Exists("server") then m.server = registry.Read("server")
-    m.video = m.top.FindNode("video")
+    m.videoA = m.top.FindNode("videoA")
+    m.videoB = m.top.FindNode("videoB")
+    m.video = m.videoA
+    m.activeVideoId = ""
+    m.pendingVideoId = ""
+    m.pendingSessionId = ""
+    m.pendingHudTitle = ""
     m.guideLayer = m.top.FindNode("guideLayer")
-    m.video.ObserveField("state", "onVideoState")
+    m.videoA.ObserveField("state", "onVideoAState")
+    m.videoB.ObserveField("state", "onVideoBState")
     m.rows = []
     m.currentChannel = 0
     m.currentProgram = 0
@@ -289,7 +296,7 @@ end sub
 
 sub tuneCurrentChannel()
     if m.rows.Count() = 0 then return
-    stopPlayback()
+    cancelPendingTune()
     row = m.rows[m.currentChannel]
     m.isTuning = true
     m.top.FindNode("status").text = "Tuning channel " + row.channel_number + "…"
@@ -314,20 +321,76 @@ sub onPlaybackReady(event)
     content.url = url
     content.streamFormat = "hls"
     content.live = true
+    m.pendingHudTitle = "CH " + m.rows[m.currentChannel].channel_number + "  " + m.rows[m.currentChannel].channel_name
     if result.now <> invalid
         content.title = result.now.program_title
-        m.top.FindNode("hudTitle").text = "CH " + result.now.channel_number + "  " + result.now.program_title
+        m.pendingHudTitle = "CH " + result.now.channel_number + "  " + result.now.program_title
     end if
-    m.sessionId = ""
-    if result.session_id <> invalid then m.sessionId = result.session_id
-    m.video.content = content
+    m.pendingSessionId = ""
+    if result.session_id <> invalid then m.pendingSessionId = result.session_id
+    if m.activeVideoId = "A"
+        target = m.videoB
+        m.pendingVideoId = "B"
+    else
+        target = m.videoA
+        m.pendingVideoId = "A"
+    end if
+    target.control = "stop"
+    target.opacity = 0
+    target.mute = true
+    target.visible = true
+    target.content = content
     m.top.FindNode("status").text = ""
-    m.video.visible = true
+    m.top.SetFocus(true)
+    target.control = "play"
+end sub
+
+sub onVideoAState(event)
+    handleVideoState("A", m.videoA, event.GetData())
+end sub
+
+sub onVideoBState(event)
+    handleVideoState("B", m.videoB, event.GetData())
+end sub
+
+sub handleVideoState(which as String, node as Object, state as String)
+    if which = m.pendingVideoId
+        if state = "playing"
+            finishBufferedTune(which, node)
+        else if state = "error"
+            cancelPendingTune()
+            m.top.FindNode("status").text = "Playback failed. The previous channel is still playing."
+            if m.inPlayer then showPlayerHud()
+        end if
+        return
+    end if
+    if which = m.activeVideoId and state = "finished" and m.inPlayer
+        tuneCurrentChannel()
+    end if
+end sub
+
+sub finishBufferedTune(which as String, node as Object)
+    oldVideo = m.video
+    oldVideoId = m.activeVideoId
+    oldSessionId = m.sessionId
+    node.opacity = 1
+    node.visible = true
+    if oldVideoId <> "" and oldVideoId <> which
+        oldVideo.control = "stop"
+        oldVideo.visible = false
+        oldVideo.opacity = 1
+    end if
+    node.mute = false
+    m.video = node
+    m.activeVideoId = which
+    m.sessionId = m.pendingSessionId
+    m.pendingSessionId = ""
+    m.pendingVideoId = ""
+    m.top.FindNode("hudTitle").text = m.pendingHudTitle
     m.inPlayer = true
     closeGuideOverlay()
     showPlayerHud()
-    m.top.SetFocus(true)
-    m.video.control = "play"
+    cleanupSession(oldSessionId)
 end sub
 
 sub showPlayerHud()
@@ -361,38 +424,46 @@ sub closeGuideOverlay()
 end sub
 
 sub cancelPendingTune()
-    if not m.isTuning then return
+    if not m.isTuning and m.pendingVideoId = "" then return
     m.isTuning = false
     if m.playTask <> invalid then m.playTask.control = "stop"
+    if m.pendingVideoId = "A"
+        m.videoA.control = "stop"
+        m.videoA.visible = false
+        m.videoA.opacity = 1
+        m.videoA.mute = false
+    else if m.pendingVideoId = "B"
+        m.videoB.control = "stop"
+        m.videoB.visible = false
+        m.videoB.opacity = 1
+        m.videoB.mute = false
+    end if
+    cleanupSession(m.pendingSessionId)
+    m.pendingSessionId = ""
+    m.pendingVideoId = ""
     m.top.FindNode("status").text = ""
+end sub
+
+sub cleanupSession(sessionId as String)
+    if sessionId = "" then return
+    cleanup = CreateObject("roSGNode", "RequestTask")
+    cleanup.url = m.server + "/api/watch/sessions/" + sessionId
+    cleanup.method = "DELETE"
+    cleanup.control = "run"
 end sub
 
 sub stopPlayback()
     cancelPendingTune()
-    if m.video <> invalid
-        m.video.control = "stop"
-        m.video.visible = false
-    end if
+    m.videoA.control = "stop"
+    m.videoA.visible = false
+    m.videoB.control = "stop"
+    m.videoB.visible = false
     m.top.FindNode("playerHud").visible = false
     m.top.FindNode("status").text = ""
     m.inPlayer = false
-    if m.sessionId <> ""
-        cleanup = CreateObject("roSGNode", "RequestTask")
-        cleanup.url = m.server + "/api/watch/sessions/" + m.sessionId
-        cleanup.method = "DELETE"
-        cleanup.control = "run"
-        m.sessionId = ""
-    end if
-end sub
-
-sub onVideoState(event)
-    state = event.GetData()
-    if state = "error"
-        m.top.FindNode("status").text = "Playback failed. Press Back for the guide."
-        m.top.FindNode("playerHud").visible = true
-    else if state = "finished" and m.inPlayer
-        tuneCurrentChannel()
-    end if
+    cleanupSession(m.sessionId)
+    m.sessionId = ""
+    m.activeVideoId = ""
 end sub
 
 sub onRequestError(event)
@@ -484,7 +555,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             targetPixel = Int((currentPrograms[m.currentProgram].roku_start_pixel + currentPrograms[m.currentProgram].roku_end_pixel) / 2)
         end if
         m.currentChannel = m.currentChannel - 1
-        if m.currentChannel < 0 then m.currentChannel = 0
+        if m.currentChannel < 0 then m.currentChannel = m.rows.Count() - 1
         m.currentProgram = closestProgramIndex(m.currentChannel, targetPixel)
         refreshGuideSelection()
         return true
@@ -495,7 +566,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             targetPixel = Int((currentPrograms[m.currentProgram].roku_start_pixel + currentPrograms[m.currentProgram].roku_end_pixel) / 2)
         end if
         m.currentChannel = m.currentChannel + 1
-        if m.currentChannel >= m.rows.Count() then m.currentChannel = m.rows.Count() - 1
+        if m.currentChannel >= m.rows.Count() then m.currentChannel = 0
         m.currentProgram = closestProgramIndex(m.currentChannel, targetPixel)
         refreshGuideSelection()
         return true

@@ -6,7 +6,8 @@
   <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
   <children>
     <Rectangle width="1920" height="1080" color="#07111D" />
-    <Video id="video" width="1920" height="1080" visible="false" enableUI="false" />
+    <Video id="videoA" width="1920" height="1080" visible="false" enableUI="false" />
+    <Video id="videoB" width="1920" height="1080" visible="false" enableUI="false" />
     <Group id="guideLayer">
       <Rectangle width="1920" height="1080" color="#07111DE8" />
       <Rectangle id="heroShade" width="1920" height="330" color="#0D2135F2" />
