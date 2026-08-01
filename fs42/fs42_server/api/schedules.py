@@ -7,6 +7,7 @@ from fs42.liquid_api import LiquidAPI
 from fs42.metadata_io import MetadataIO
 from fs42.title_parser import TitleParser
 from fs42.live_news import schedule_blocks as live_schedule_blocks
+from fs42.artwork_preloader import artwork_url as canonical_artwork_url
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 EPISODE_RE = re.compile(
@@ -477,6 +478,7 @@ def _attach_meta(blocks, read_meta: bool = True):
         )
         for key, value in display.items():
             setattr(block, key, value)
+        block.artwork_url = canonical_artwork_url(path, meta)
         programming = getattr(block, "programming", None)
         if isinstance(programming, dict):
             block.airing_kind = programming.get("airing_kind")

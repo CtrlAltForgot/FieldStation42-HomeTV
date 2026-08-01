@@ -8,6 +8,7 @@ from fs42.liquid_manager import LiquidManager
 from fs42.liquid_schedule import LiquidSchedule
 from fs42.catalog import ShowCatalog
 from fs42.metadata_enrichment import MetadataEnricher
+from fs42.artwork_preloader import prepare_all_series
 
 router = APIRouter(prefix="/build", tags=["build"])
 
@@ -116,6 +117,11 @@ async def quick_action(action: str, network_name: str, request: Request):
                     LiquidSchedule(station).add_amount(amount)
             if action.startswith("rebuild") or action == "scan_metadata":
                 _scan_metadata(selected, log)
+                artwork = prepare_all_series()
+                log(
+                    "Canonical artwork index: "
+                    f"{artwork.get('complete', 0)}/{artwork.get('total', 0)} ready."
+                )
             LiquidManager().reload_schedules()
             command_queue = request.app.state.player_command_queue
             if command_queue:
@@ -208,6 +214,11 @@ async def rebuild_catalog(
                     rebuild_tasks[task_id]["log"] += message + "\n"
 
             _scan_metadata(to_rebuild, metadata_log)
+            artwork = prepare_all_series()
+            metadata_log(
+                "Canonical artwork index: "
+                f"{artwork.get('complete', 0)}/{artwork.get('total', 0)} ready."
+            )
 
             with rebuild_tasks_lock:
                 rebuild_tasks[task_id]["status"] = "done"

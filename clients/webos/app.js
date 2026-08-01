@@ -19,14 +19,26 @@
   }
 
   function render() {
-    $("#channels").innerHTML = rows.map(function (item, index) {
-      return '<div class="item ' + (pane === "channels" && index === row ? "focus" : "") + '">' + item.channel_number + '&nbsp;&nbsp; ' + item.channel_name + '</div>';
+    var first = Math.max(0, Math.min(row - 3, rows.length - 7));
+    $("#epg").innerHTML = rows.slice(first, first + 7).map(function (channel, offset) {
+      var rowIndex = first + offset;
+      var entries = channel.programs || [];
+      var selected = rowIndex === row ? program : 0;
+      var programFirst = Math.max(0, Math.min(selected - 1, entries.length - 5));
+      var cards = entries.slice(programFirst, programFirst + 5).map(function (item, itemOffset) {
+        var itemIndex = programFirst + itemOffset;
+        var focused = rowIndex === row && itemIndex === program;
+        return '<div class="program-card ' + (focused ? "focus" : "") + '"><strong>' + escapeHtml(titleOf(item)) + '</strong><span>' + escapeHtml(item.program_details || "") + '</span></div>';
+      }).join("") || '<div class="program-card empty">No programming available</div>';
+      return '<div class="epg-row"><div class="channel-card">' + escapeHtml(channel.channel_number + "  " + channel.channel_name) + '</div><div class="program-strip">' + cards + '</div></div>';
     }).join("");
-    var programs = rows[row] && rows[row].programs || [];
-    $("#programs").innerHTML = programs.map(function (item, index) {
-      return '<div class="item ' + (pane === "programs" && index === program ? "focus" : "") + '">' + titleOf(item) + '&nbsp;&nbsp; ' + (item.program_details || "") + '</div>';
-    }).join("") || '<div class="item">No programming available</div>';
     showDetails();
+  }
+
+  function escapeHtml(value) {
+    return String(value || "").replace(/[&<>"']/g, function (character) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character];
+    });
   }
 
   function showDetails() {
@@ -37,12 +49,13 @@
     $("#details").textContent = item && item.program_details || "No programming available";
     var metadata = item && item.meta || {};
     $("#description").textContent = metadata.plot || metadata.description || "";
-    $("#artwork").src = server + channel.artwork_url + (item ? "?at=" + encodeURIComponent(item.start_time) : "");
+    var art = item && item.artwork_url;
+    if (art) $("#artwork").src = server + art;
   }
 
   function loadGuide() {
     $("#status").textContent = "Connecting to " + server + "…";
-    return api("/api/tv/guide?hours=12").then(function (result) {
+    return api("/api/tv/guide?hours=6").then(function (result) {
       rows = result.channels || [];
       row = Math.min(row, Math.max(0, rows.length - 1));
       program = 0;
@@ -113,17 +126,14 @@
       return;
     }
     if ([13,37,38,39,40,403,404,405,406,427,428,461].indexOf(key) >= 0) event.preventDefault();
-    if (key === 37) pane = "channels";
-    else if (key === 39) pane = "programs";
-    else if (key === 38) {
-      if (pane === "channels") { row = Math.max(0,row-1); program=0; }
-      else program = Math.max(0,program-1);
+    if (key === 37) program = Math.max(0, program - 1);
+    else if (key === 39) {
+      var rowLength = rows[row] && rows[row].programs && rows[row].programs.length || 1;
+      program = Math.min(rowLength - 1, program + 1);
+    } else if (key === 38) {
+      row = Math.max(0,row-1); program=0;
     } else if (key === 40) {
-      if (pane === "channels") { row=Math.min(rows.length-1,row+1); program=0; }
-      else {
-        var length = rows[row] && rows[row].programs && rows[row].programs.length || 1;
-        program=Math.min(length-1,program+1);
-      }
+      row=Math.min(rows.length-1,row+1); program=0;
     } else if (key === 13) tune();
     else if (key === 405) openSettings();
     else if (key === 427) changeChannel(1);

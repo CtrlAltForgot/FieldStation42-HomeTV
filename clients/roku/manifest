@@ -10,4 +10,4 @@ splash_color=#07111D
 splash_min_time=800
 ui_resolutions=fhd
 supports_input_launch=1
-
+requires_network=1

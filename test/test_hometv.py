@@ -1597,6 +1597,63 @@ class ProviderSettingsTests(unittest.TestCase):
 
 
 class MetadataEnrichmentTests(unittest.TestCase):
+    def test_canonical_artwork_key_is_shared_by_every_series_episode(self):
+        from fs42.artwork_preloader import canonical_key
+
+        first = canonical_key(
+            "/tv/SpongeBob/S01E01.mkv",
+            {"type": "episode", "show_title": "SpongeBob SquarePants"},
+        )
+        future = canonical_key(
+            "/tv/SpongeBob/S20E10.mkv",
+            {"type": "episode", "show_title": "SpongeBob SquarePants"},
+        )
+        other = canonical_key(
+            "/tv/The Blacklist/S01E01.mkv",
+            {"type": "episode", "show_title": "The Blacklist"},
+        )
+        self.assertEqual(first[0], future[0])
+        self.assertNotEqual(first[0], other[0])
+
+    def test_named_fallback_is_program_specific_and_persisted(self):
+        from fs42 import artwork_preloader
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            artwork_preloader, "artwork_root", return_value=Path(temp_dir)
+        ):
+            sponge = artwork_preloader._ensure_named_fallback(
+                "series:spongebob-squarepants", "SpongeBob SquarePants"
+            )
+            blacklist = artwork_preloader._ensure_named_fallback(
+                "series:the-blacklist", "The Blacklist"
+            )
+            self.assertRegex(sponge, r"^[a-f0-9]{64}\.jpg$")
+            self.assertNotEqual(sponge, blacklist)
+            self.assertGreater((Path(temp_dir) / sponge).stat().st_size, 1000)
+
+    def test_index_resolves_odd_episode_names_without_rereading_metadata(self):
+        from fs42 import artwork_preloader
+
+        path = "/tv/Forensic Files/Forensic Files 07x36 All Charged Up.mkv"
+        filename = "d" * 64 + ".jpg"
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            artwork_preloader, "artwork_root", return_value=Path(temp_dir)
+        ):
+            (Path(temp_dir) / filename).write_bytes(b"forensic files artwork")
+            old_index = artwork_preloader._INDEX
+            artwork_preloader._INDEX = {
+                "version": 2,
+                "entries": {"series:forensic-files": {"file": filename}},
+                "paths": {
+                    artwork_preloader._path_digest(path): "series:forensic-files"
+                },
+            }
+            try:
+                record = artwork_preloader.artwork_record(path, None)
+            finally:
+                artwork_preloader._INDEX = old_index
+            self.assertEqual(record["file"], filename)
+
     def test_startup_preloader_caches_each_series_once(self):
         from fs42 import artwork_preloader
 
@@ -1607,20 +1664,25 @@ class MetadataEnrichmentTests(unittest.TestCase):
         ]
         stations = [{"_has_catalog": True}]
         warmed = []
-        fake_enricher = SimpleNamespace(
-            ensure_series_artwork=lambda series, path: warmed.append((series, path)) or "art.jpg"
-        )
         def metadata(path):
             return {"type": "episode", "show_title": (
                 "SpongeBob SquarePants" if "SpongeBob" in path else "The Blacklist"
             )}
-        with (
-            patch.object(artwork_preloader, "StationManager", return_value=SimpleNamespace(stations=stations)),
-            patch.object(artwork_preloader.CatalogAPI, "get_entries", return_value=entries),
-            patch.object(artwork_preloader.MetadataIO, "read", side_effect=metadata),
-            patch.object(artwork_preloader, "MetadataEnricher", return_value=fake_enricher),
-        ):
-            result = artwork_preloader.prepare_all_series()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            def ensure(series, path):
+                warmed.append((series, path))
+                name = ("a" if "Sponge" in series else "b") * 64 + ".jpg"
+                (Path(temp_dir) / name).write_bytes(series.encode())
+                return name
+            fake_enricher = SimpleNamespace(ensure_series_artwork=ensure)
+            with (
+                patch.object(artwork_preloader, "artwork_root", return_value=Path(temp_dir)),
+                patch.object(artwork_preloader, "StationManager", return_value=SimpleNamespace(stations=stations)),
+                patch.object(artwork_preloader.CatalogAPI, "get_entries", return_value=entries),
+                patch.object(artwork_preloader.MetadataIO, "read", side_effect=metadata),
+                patch.object(artwork_preloader, "MetadataEnricher", return_value=fake_enricher),
+            ):
+                result = artwork_preloader.prepare_all_series()
         self.assertEqual(result["state"], "ready")
         self.assertEqual(result["total"], 2)
         self.assertEqual(len(warmed), 2)
@@ -1941,10 +2003,11 @@ class WatchAPITests(unittest.TestCase):
         response = asyncio.run(channel_endpoint(self.request))
         self.assertNotIn("path", str(response))
 
-    def test_artwork_endpoint_serves_only_discovered_local_art(self):
+    def test_artwork_endpoint_serves_only_preindexed_local_art(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             media = Path(temp_dir) / "Movie.mkv"
-            poster = Path(temp_dir) / "Movie.jpg"
+            filename = "e" * 64 + ".jpg"
+            poster = Path(temp_dir) / filename
             media.touch()
             poster.write_bytes(b"image")
             airing = SimpleNamespace(identity_path=str(media), media_path=str(media))
@@ -1960,8 +2023,16 @@ class WatchAPITests(unittest.TestCase):
                     )
                 )
             )
-            response = asyncio.run(artwork_endpoint("42", request))
+            with patch(
+                "fs42.fs42_server.api.watch.artwork_record",
+                return_value={"file": filename},
+            ), patch(
+                "fs42.fs42_server.api.watch.artwork_root",
+                return_value=Path(temp_dir),
+            ):
+                response = asyncio.run(artwork_endpoint("42", request))
             self.assertEqual(Path(response.path), poster)
+            self.assertIn("immutable", response.headers["cache-control"])
 
     def test_now_payload_uses_series_and_episode_identity(self):
         when = dt.datetime(2026, 7, 31, 12, 0)
@@ -2067,6 +2138,7 @@ class BuildOperationTests(unittest.TestCase):
             patch("fs42.fs42_server.api.build.CatalogAPI.delete_catalog"),
             patch("fs42.fs42_server.api.build.ShowCatalog"),
             patch("fs42.fs42_server.api.build._scan_metadata"),
+            patch("fs42.fs42_server.api.build.prepare_all_series", return_value={"state": "ready", "indexed": 1}),
             patch("fs42.fs42_server.api.build.LiquidManager.reload_schedules"),
             patch("fs42.fs42_server.api.build.LiquidSchedule") as schedule,
         ):

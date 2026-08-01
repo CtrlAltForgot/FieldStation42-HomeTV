@@ -73,8 +73,27 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
         ):
             continue
         payload = _schedule_payload(
-            station["network_name"], _iso(start), _iso(end), True, True
+            station["network_name"], _iso(start), _iso(end), False, True
         )
+        programs = payload.get("schedule_blocks", [])
+        if station.get("network_type") == "live_news":
+            for program in programs:
+                program["artwork_url"] = (
+                    f"/api/watch/channels/{station['channel_number']}/artwork"
+                )
+        else:
+            missing = [
+                getattr(program, "display_title", None)
+                or getattr(program, "title", "Unknown program")
+                for program in programs
+                if not getattr(program, "artwork_url", None)
+            ]
+            if missing:
+                raise HTTPException(
+                    503,
+                    "Canonical artwork index is incomplete for: "
+                    + ", ".join(dict.fromkeys(missing[:5])),
+                )
         rows.append({
             "channel_number": str(station["channel_number"]),
             "channel_name": station.get("network_long_name")
@@ -84,7 +103,7 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
             "artwork_url": (
                 f"/api/watch/channels/{station['channel_number']}/artwork"
             ),
-            "programs": payload.get("schedule_blocks", []),
+            "programs": programs,
             "error": payload.get("error"),
         })
     rows.sort(
@@ -97,4 +116,5 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
         "end": _iso(end),
         "server_time": _iso(dt.datetime.now()),
         "channels": rows,
+        "artwork_ready": True,
     }

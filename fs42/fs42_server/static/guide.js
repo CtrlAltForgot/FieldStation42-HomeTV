@@ -94,7 +94,6 @@
         return end > state.start && start < state.end;
       });
     });
-    await prewarmArtwork();
     render();
     selectInitial();
     $("#guide-message").hidden = true;
@@ -102,14 +101,14 @@
 
   function artworkKey(station, block) {
     if (station.is_live_source) return `live:${station.channel_number}`;
-    const meta = block.meta || {};
-    const kind = String(meta.type || "program").toLocaleLowerCase();
-    const series = meta.show_title || block.display_title || block.title || "";
-    return `${kind}:${String(series).toLocaleLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}]+/gu, "")}`;
+    return block.artwork_url || null;
   }
 
   function artworkUrl(station, block) {
-    return `/api/watch/channels/${encodeURIComponent(station.channel_number)}/artwork?at=${encodeURIComponent(block.start_time)}`;
+    if (station.is_live_source) {
+      return `/api/watch/channels/${encodeURIComponent(station.channel_number)}/artwork`;
+    }
+    return block.artwork_url || null;
   }
 
   async function cacheArtwork(key, url) {
@@ -126,24 +125,6 @@
     } catch (error) {
       URL.revokeObjectURL(blobUrl);
       throw error;
-    }
-  }
-
-  async function prewarmArtwork() {
-    const jobs = new Map();
-    state.rows.forEach(row => row.visibleBlocks.forEach(block => {
-      const key = artworkKey(row.station, block);
-      if (!jobs.has(key)) jobs.set(key, artworkUrl(row.station, block));
-    }));
-    const pending = [...jobs].filter(([key]) => !state.artworkCache.has(key));
-    let complete = 0;
-    for (let index = 0; index < pending.length; index += 6) {
-      await Promise.all(pending.slice(index, index + 6).map(async ([key, url]) => {
-        try { await cacheArtwork(key, url); }
-        catch (error) { state.artworkFailures.add(key); console.error("Artwork preload failed", key, error); }
-        complete += 1;
-        $("#guide-message").textContent = `Preparing guide artwork ${complete}/${pending.length}…`;
-      }));
     }
   }
 
@@ -303,8 +284,6 @@
     $("#watch-button").hidden = !live;
     $("#preview-progress").hidden = !live;
     updateProgress();
-    art.hidden = true;
-    art.removeAttribute("src");
     loadPreviewArtwork(station, block);
   }
 
@@ -312,6 +291,11 @@
     const token = ++state.artworkToken;
     art.hidden = true;
     const key = artworkKey(station, block);
+    if (!key) {
+      $("#artwork-loading").hidden = false;
+      $("#artwork-loading span").textContent = "Show artwork unavailable";
+      return;
+    }
     let blobUrl = state.artworkCache.get(key);
     if (!blobUrl && !state.artworkFailures.has(key)) {
       try {
@@ -327,10 +311,24 @@
       art.src = blobUrl;
       art.hidden = false;
       $("#artwork-loading").hidden = true;
+      prefetchNearbyArtwork();
       return;
     }
     $("#artwork-loading").hidden = false;
     $("#artwork-loading span").textContent = "Artwork unavailable";
+  }
+
+  function prefetchNearbyArtwork() {
+    const row = state.rows[state.rowIndex];
+    if (!row) return;
+    [state.blockIndex - 1, state.blockIndex + 1].forEach(index => {
+      const block = row.visibleBlocks[index];
+      if (!block) return;
+      const key = artworkKey(row.station, block);
+      if (key && !state.artworkCache.has(key) && !state.artworkFailures.has(key)) {
+        cacheArtwork(key, artworkUrl(row.station, block)).catch(() => state.artworkFailures.add(key));
+      }
+    });
   }
 
   function updateProgress() {

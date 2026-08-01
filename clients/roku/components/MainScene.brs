@@ -12,6 +12,7 @@ sub init()
     m.video.ObserveField("state", "onVideoState")
     m.rows = []
     m.currentChannel = 0
+    m.currentProgram = 0
     m.sessionId = ""
     m.inPlayer = false
     loadGuide()
@@ -26,10 +27,17 @@ end sub
 sub loadGuide()
     m.top.FindNode("status").text = "Connecting to " + m.server + "…"
     m.guideTask = CreateObject("roSGNode", "RequestTask")
-    m.guideTask.url = m.server + "/api/tv/guide?hours=12"
+    m.guideTask.url = m.server + "/api/tv/guide?hours=6"
+    m.guideTask.ObserveField("state", "onGuideTaskState")
     m.guideTask.ObserveField("response", "onGuideLoaded")
     m.guideTask.ObserveField("error", "onRequestError")
     m.guideTask.control = "run"
+end sub
+
+sub onGuideTaskState(event)
+    if event.GetData() = "stop" and m.rows.Count() = 0 and m.guideTask.error = ""
+        m.top.FindNode("status").text = "The guide request ended without data. Press * to verify the server address."
+    end if
 end sub
 
 sub onGuideLoaded(event)
@@ -43,12 +51,14 @@ sub onGuideLoaded(event)
     end for
     m.channels.content = root
     m.top.FindNode("status").text = "Ready"
-    m.channels.SetFocus(true)
+    m.top.SetFocus(true)
     onChannelFocused(invalid)
+    renderGuideGrid()
 end sub
 
 sub onChannelFocused(event)
-    index = m.channels.itemFocused
+    index = m.currentChannel
+    if event <> invalid then index = m.channels.itemFocused
     if index < 0 or index >= m.rows.Count() then return
     m.currentChannel = index
     row = m.rows[index]
@@ -65,11 +75,82 @@ sub onChannelFocused(event)
     end if
     m.programs.content = root
     m.programs.jumpToItem = 0
+    m.currentProgram = 0
     showProgram(0)
 end sub
 
 sub onProgramFocused(event)
+    m.currentProgram = m.programs.itemFocused
     showProgram(m.programs.itemFocused)
+end sub
+
+function addGuideLabel(group as Object, value as String, x as Integer, y as Integer, width as Integer, color as String, font as String) as Object
+    label = CreateObject("roSGNode", "Label")
+    label.text = value
+    label.translation = [x, y]
+    label.width = width
+    label.height = 64
+    label.color = color
+    label.font = font
+    label.vertAlign = "center"
+    label.ellipsizeOnBoundary = true
+    group.AppendChild(label)
+    return label
+end function
+
+sub renderGuideGrid()
+    grid = m.top.FindNode("guideGrid")
+    count = grid.GetChildCount()
+    if count > 0 then grid.RemoveChildrenIndex(count, 0)
+    if m.rows.Count() = 0 then return
+    firstRow = m.currentChannel - 3
+    if firstRow < 0 then firstRow = 0
+    if firstRow > m.rows.Count() - 7 then firstRow = m.rows.Count() - 7
+    if firstRow < 0 then firstRow = 0
+    for visibleRow = 0 to 6
+        rowIndex = firstRow + visibleRow
+        if rowIndex >= m.rows.Count() then exit for
+        rowData = m.rows[rowIndex]
+        y = visibleRow * 84
+        channelBg = CreateObject("roSGNode", "Rectangle")
+        channelBg.translation = [0, y]
+        channelBg.width = 255
+        channelBg.height = 78
+        channelBg.color = "#101D2A"
+        grid.AppendChild(channelBg)
+        addGuideLabel(grid, rowData.channel_number + "  " + rowData.channel_name, 16, y + 7, 225, "#FFFFFF", "font:SmallBoldSystemFont")
+        programs = rowData.programs
+        if programs = invalid or programs.Count() = 0
+            addGuideLabel(grid, "No programming available", 280, y + 7, 1440, "#8195A7", "font:SmallSystemFont")
+        else
+            selectedProgram = 0
+            if rowIndex = m.currentChannel then selectedProgram = m.currentProgram
+            firstProgram = selectedProgram - 1
+            if firstProgram < 0 then firstProgram = 0
+            if firstProgram > programs.Count() - 5 then firstProgram = programs.Count() - 5
+            if firstProgram < 0 then firstProgram = 0
+            for column = 0 to 4
+                programIndex = firstProgram + column
+                if programIndex >= programs.Count() then exit for
+                programData = programs[programIndex]
+                x = 270 + (column * 298)
+                card = CreateObject("roSGNode", "Rectangle")
+                card.translation = [x, y]
+                card.width = 290
+                card.height = 78
+                card.color = "#202D3A"
+                if rowIndex = m.currentChannel and programIndex = m.currentProgram then card.color = "#1675B8"
+                grid.AppendChild(card)
+                title = programData.display_title
+                if title = invalid or title = "" then title = programData.title
+                addGuideLabel(grid, title, x + 14, y + 2, 262, "#FFFFFF", "font:SmallBoldSystemFont")
+                detail = programData.program_details
+                if detail = invalid then detail = ""
+                detailLabel = addGuideLabel(grid, detail, x + 14, y + 37, 262, "#AAB9C7", "font:TinySystemFont")
+                detailLabel.height = 35
+            end for
+        end if
+    end for
 end sub
 
 sub showProgram(index as Integer)
@@ -93,7 +174,8 @@ sub showProgram(index as Integer)
         if description = "" and program.meta.description <> invalid then description = program.meta.description
     end if
     m.top.FindNode("programDescription").text = description
-    m.top.FindNode("artwork").uri = m.server + row.artwork_url + "?at=" + program.start_time
+    art = program.artwork_url
+    if art <> invalid and art <> "" then m.top.FindNode("artwork").uri = m.server + art
 end sub
 
 sub onChannelSelected(event)
@@ -228,11 +310,37 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return true
         end if
     end if
-    if key = "right" and m.programs.content <> invalid
-        m.programs.SetFocus(true)
+    if m.rows.Count() = 0
+        if key = "options" then showServerDialog()
+        return true
+    end if
+    if key = "up"
+        m.currentChannel = m.currentChannel - 1
+        if m.currentChannel < 0 then m.currentChannel = 0
+        m.currentProgram = 0
+        onChannelFocused(invalid)
+        renderGuideGrid()
+        return true
+    else if key = "down"
+        m.currentChannel = m.currentChannel + 1
+        if m.currentChannel >= m.rows.Count() then m.currentChannel = m.rows.Count() - 1
+        m.currentProgram = 0
+        onChannelFocused(invalid)
+        renderGuideGrid()
+        return true
+    else if key = "right"
+        programs = m.rows[m.currentChannel].programs
+        if programs <> invalid and m.currentProgram < programs.Count() - 1 then m.currentProgram = m.currentProgram + 1
+        showProgram(m.currentProgram)
+        renderGuideGrid()
         return true
     else if key = "left"
-        m.channels.SetFocus(true)
+        if m.currentProgram > 0 then m.currentProgram = m.currentProgram - 1
+        showProgram(m.currentProgram)
+        renderGuideGrid()
+        return true
+    else if key = "OK"
+        tuneCurrentChannel()
         return true
     else if key = "options"
         showServerDialog()

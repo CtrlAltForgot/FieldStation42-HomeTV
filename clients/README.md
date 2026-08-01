@@ -16,6 +16,15 @@ server address with the Roku on-screen keyboard.
 After deploying the matching server release, the validated package is also
 available at `http://YOUR-SERVER:4243/api/tv/apps/roku`.
 
+To update a sideloaded Roku channel, download that ZIP, open
+`http://ROKU-IP` in a browser, choose **Upload**, select the ZIP, and choose
+**Install**. It replaces the previous sideloaded build. If the installer is
+not enabled, press Home three times, Up twice, then Right, Left, Right, Left,
+Right; enable the installer and set its password. Roku and the myHomeTV server
+must be on the same LAN. Network requests have a 15-second timeout, so a bad
+server address now produces a useful error instead of an endless Connecting
+screen.
+
 The physical remote is sufficient: arrows browse, OK tunes, Back always exits
 video to the guide, and channel Up/Down changes stations while watching. The
 Video node has its own UI disabled, so an upstream web player cannot trap the
@@ -30,6 +39,20 @@ playback to the guide; channel Up/Down changes stations.
 
 The validated IPK is available from the server at
 `http://YOUR-SERVER:4243/api/tv/apps/webos`.
+
+For a first install, install LG's **Developer Mode** app from the Content
+Store, sign into an LG developer account, enable Developer Mode and Key Server,
+and note the TV IP and passphrase. On a computer with the official webOS CLI:
+
+```sh
+ares-setup-device --add myhometv-lg
+ares-novacom --device myhometv-lg --getkey
+ares-install --device myhometv-lg myhometv-webos.ipk
+```
+
+Use port `9922`, user `prisoner`, and the TV IP when prompted. Enter the Key
+Server passphrase for `ares-novacom`. Keep the Developer Mode session renewed
+or webOS will eventually remove access to the sideloaded app.
 
 ## Capacity
 

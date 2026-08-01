@@ -1,7 +1,6 @@
 import asyncio
 import datetime as dt
 import logging
-import mimetypes
 import re
 import time
 from pathlib import Path
@@ -19,7 +18,8 @@ from fs42.hometv import (
 from fs42.fs42_server.api.schedules import program_display
 from fs42.metadata_io import MetadataIO
 from fs42.artwork_preloader import status as artwork_preload_status
-from fs42.metadata_enrichment import MetadataEnricher, _episode_identity, artwork_root
+from fs42.metadata_enrichment import artwork_root
+from fs42.artwork_preloader import artwork_record
 from fs42.live_news import (
     artwork_svg, discover_direct_hls, discover_live_video,
     now_payload as live_now_payload,
@@ -123,7 +123,7 @@ async def now(channel: str, request: Request):
 
 @router.get("/channels/{channel}/artwork")
 async def artwork(channel: str, request: Request, at: dt.datetime | None = None):
-    """Serve trusted local artwork for one scheduled program without paths."""
+    """Serve only an already-indexed canonical series/movie image."""
     try:
         resolver = _manager(request).resolver
         station = resolver.station(channel)
@@ -141,78 +141,33 @@ async def artwork(channel: str, request: Request, at: dt.datetime | None = None)
         raise _watch_error(exc)
 
     metadata = MetadataIO.read(str(approved)) or {}
-    identity = _episode_identity(str(approved), metadata)
-    series_name = str(identity.get("series") or metadata.get("show_title", "")).strip()
-    if series_name:
-        series_artwork = Path(str(metadata.get("series_artwork_file", ""))).name
-        managed_series_art = (artwork_root() / series_artwork).resolve()
-        if not (
-            re.fullmatch(r"[a-f0-9]{64}\.jpg", series_artwork)
-            and managed_series_art.parent == artwork_root()
-            and managed_series_art.is_file()
-            and managed_series_art.stat().st_size
-        ):
-            series_artwork = await asyncio.to_thread(
-                MetadataEnricher().ensure_series_artwork,
-                series_name,
-                str(approved),
-            )
-        if series_artwork:
-            managed_series_art = (artwork_root() / series_artwork).resolve()
-            if managed_series_art.parent == artwork_root() and managed_series_art.is_file():
-                return FileResponse(
-                    managed_series_art,
-                    media_type="image/jpeg",
-                    headers={"Cache-Control": "private, max-age=86400"},
-                )
-        # Episodic airings may only display canonical series art. Never leak
-        # an episode-specific still or a generic channel card into this path.
-        raise HTTPException(503, "Series artwork is still being prepared")
-    artwork_file = Path(str(metadata.get("artwork_file", ""))).name
-    if artwork_file and re.fullmatch(r"[a-f0-9]{64}\.jpg", artwork_file):
-        managed_art = (artwork_root() / artwork_file).resolve()
-        if managed_art.parent == artwork_root() and managed_art.is_file():
-            return FileResponse(
-                managed_art,
-                media_type="image/jpeg",
-                headers={"Cache-Control": "private, max-age=86400"},
-            )
+    record = artwork_record(str(approved), metadata)
+    if not record:
+        raise HTTPException(503, "Canonical program artwork is not ready")
+    return _artwork_file(record["file"])
 
-    extensions = (".jpg", ".jpeg", ".png", ".webp")
-    candidates = [approved.with_suffix(ext) for ext in extensions]
-    for directory in (approved.parent, approved.parent.parent):
-        for stem in ("fanart", "backdrop", "thumb", "poster", "folder"):
-            candidates.extend(directory / f"{stem}{ext}" for ext in extensions)
-    for candidate in candidates:
-        try:
-            resolved = candidate.resolve(strict=True)
-        except (FileNotFoundError, OSError):
-            continue
-        if resolved.is_file() and resolved.parent in {
-            approved.parent.resolve(), approved.parent.parent.resolve()
-        }:
-            media_type, _ = mimetypes.guess_type(resolved.name)
-            return FileResponse(
-                resolved,
-                media_type=media_type or "image/jpeg",
-                headers={"Cache-Control": "private, max-age=3600"},
-            )
 
-    # A local frame guarantees useful guide art even when online metadata is
-    # unavailable or has not completed yet. Extraction is lazy and cached, and
-    # runs off the event loop so other guide/API requests remain responsive.
-    artwork_file = await asyncio.to_thread(
-        MetadataEnricher().ensure_local_artwork, str(approved)
+def _artwork_file(asset: str):
+    name = Path(asset).name
+    target = (artwork_root() / name).resolve()
+    if not (
+        re.fullmatch(r"[a-f0-9]{64}\.jpg", name)
+        and target.parent == artwork_root()
+        and target.is_file()
+        and target.stat().st_size
+    ):
+        raise HTTPException(404, "Artwork asset not found")
+    return FileResponse(
+        target,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
-    if artwork_file:
-        managed_art = (artwork_root() / artwork_file).resolve()
-        if managed_art.parent == artwork_root() and managed_art.is_file():
-            return FileResponse(
-                managed_art,
-                media_type="image/jpeg",
-                headers={"Cache-Control": "private, max-age=86400"},
-            )
-    raise HTTPException(503, "Show-specific artwork is still being prepared")
+
+
+@router.get("/artwork/{asset}")
+async def canonical_artwork(asset: str):
+    """Serve a content-addressed guide image with year-long caching."""
+    return _artwork_file(asset)
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)

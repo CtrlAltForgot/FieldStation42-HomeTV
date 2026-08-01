@@ -217,11 +217,27 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("Hls.Events.FRAG_BUFFERED", watch)
         self.assertIn("- 20_000", watch)
 
-    def test_guide_preloads_and_decodes_artwork_before_rendering(self):
+    def test_guide_renders_without_catalog_wide_artwork_wait(self):
         guide = open("fs42/fs42_server/static/guide.js", encoding="utf-8").read()
-        self.assertLess(guide.index("await prewarmArtwork();"), guide.index("render();"))
+        self.assertNotIn("prewarmArtwork", guide)
+        self.assertNotIn("await prewarm", guide)
+        self.assertIn("prefetchNearbyArtwork", guide)
+        self.assertIn("block.artwork_url", guide)
         self.assertIn("state.artworkCache.set(key, blobUrl)", guide)
         self.assertNotIn('textContent = "Artwork loading"', guide)
+
+    def test_tv_clients_use_program_artwork_and_bound_network_waits(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        request = open("clients/roku/components/RequestTask.brs", encoding="utf-8").read()
+        manifest = open("clients/roku/manifest", encoding="utf-8").read()
+        webos = open("clients/webos/app.js", encoding="utf-8").read()
+        self.assertIn("requires_network=1", manifest)
+        self.assertIn("Wait(15000, port)", request)
+        self.assertIn("AsyncGetToString", request)
+        self.assertIn("program.artwork_url", roku)
+        self.assertIn("item.artwork_url", webos)
+        self.assertNotIn('row.artwork_url + "?at="', roku)
+        self.assertNotIn('channel.artwork_url +', webos)
 
     def test_live_news_embed_cannot_capture_controls_or_pause(self):
         player = open(
