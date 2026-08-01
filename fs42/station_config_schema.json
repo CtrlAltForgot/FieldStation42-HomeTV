@@ -48,6 +48,13 @@
           "type": "integer",
           "description": "Duration of commercial breaks in seconds"
         },
+        "movie_padding_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 300,
+          "default": 90,
+          "description": "Maximum post-credits commercial padding for movies"
+        },
         "content_dir": {
           "type": "string",
           "description": "Directory containing content files"

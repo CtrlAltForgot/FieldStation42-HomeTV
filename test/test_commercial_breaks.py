@@ -43,6 +43,24 @@ class CommercialBreakSelectionTests(unittest.TestCase):
         ):
             self.assertTrue(schedule._candidate_is_movie(movie))
 
+    def test_movie_post_credit_padding_is_capped_at_ninety_seconds(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {"schedule_increment": 30}
+        duration = 7_500
+        self.assertEqual(schedule._movie_target_duration(duration), 7_590)
+        self.assertEqual(schedule._calc_target_duration(duration), 9_000)
+
+    def test_movie_padding_cap_is_configurable_but_bounded(self):
+        schedule = LiquidSchedule.__new__(LiquidSchedule)
+        schedule.conf = {
+            "schedule_increment": 30,
+            "movie_padding_seconds": 45,
+        }
+        self.assertEqual(schedule._movie_target_duration(7_500), 7_545)
+        schedule.conf["movie_padding_seconds"] = 301
+        with self.assertRaisesRegex(ValueError, "between 0 and 300"):
+            schedule._movie_target_duration(7_500)
+
     def test_end_strategy_never_interrupts_movie_for_commercials(self):
         movie = SimpleNamespace(
             path="/media/Movies/The Feature.mkv",

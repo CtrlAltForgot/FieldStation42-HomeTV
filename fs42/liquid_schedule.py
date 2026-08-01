@@ -51,6 +51,14 @@ class LiquidSchedule:
         metadata = MetadataIO.read(path)
         return MediaProcessor.is_movie(path, metadata)
 
+    def _movie_target_duration(self, duration, increment=None):
+        """Allow only brief post-credit padding instead of a full grid gap."""
+        rounded = self._calc_target_duration(duration, increment)
+        maximum_padding = float(self.conf.get("movie_padding_seconds", 90))
+        if not 0 <= maximum_padding <= 300:
+            raise ValueError("movie_padding_seconds must be between 0 and 300")
+        return min(rounded, duration + maximum_padding)
+
     def _load_blocks(self):
         self._blocks = LiquidAPI.get_blocks(self.conf)
 
@@ -144,7 +152,11 @@ class LiquidSchedule:
             break_info, break_strategy, increment = self._break_info(slot_config, tag_str, candidate.path)
 
             is_movie = self._candidate_is_movie(candidate)
-            target_duration = self._calc_target_duration(candidate.duration, increment)
+            target_duration = (
+                self._movie_target_duration(candidate.duration, increment)
+                if is_movie
+                else self._calc_target_duration(candidate.duration, increment)
+            )
             next_mark = current_mark + datetime.timedelta(seconds=target_duration)
             new_block = LiquidBlock(
                 candidate,
