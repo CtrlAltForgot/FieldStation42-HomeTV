@@ -148,15 +148,18 @@ stream exists, FFmpeg burns that subtitle into the HLS video by default. Audio
 with an absent or `und` language tag is not guessed. The explicit `copy`
 profile remains unchanged because burning subtitles requires video encoding.
 
-The rolling playlist retains 12 two-second segments (at least 24 seconds).
+The rolling playlist retains a bounded set of one-second segments.
 The client starts as soon as HLS reports a playable manifest and leaves
 ordinary buffering to HLS.js and the browser. There is deliberately no
 client-side startup-buffer gate or pause/resume controller.
-At scheduled item boundaries the client displays every frame through the
-scheduled end, then fades/holds black while replacing the item without showing
-a tuning message, and fades back on the video element's `playing` event. The
-fade does not begin early, trim an ad or bumper, pause an active stream, or
-create additional buffering policy.
+Before a scheduled item boundary, the client asks the server to prewarm the
+exact next item and attaches its HLS manifest to a hidden second video element.
+Broadcast cache keys include the item boundary, so preparing the next ad never
+terminates the broadcaster serving the current ad's final frames. On `ended`,
+the browser promotes the already-buffered video element and releases the old
+lease. A failed prewarm falls back to ordinary boundary tuning. This preserves
+every scheduled frame while removing FFmpeg and manifest startup from the
+visible transition.
 
 The FFmpeg command is constructed as an argument vector, never a shell string.
 No endpoint accepts a command or path. Input paths come only from the current
@@ -174,6 +177,22 @@ timestamp, and recreates a session after a program boundary or playback error.
 A channel change releases the previous viewer lease before acquiring the next.
 Volume, mute, and fullscreen are browser-local and never alter another viewer
 or the legacy MPV player.
+
+## Television guide
+
+The browser guide is a focus-driven, three-hour grid rather than a passive
+auto-scrolling display. Directional keys move between programs and channels,
+number keys jump to a channel, Enter watches a selected live program, and Back
+closes an embedded guide. It opens on the last-watched channel and keeps the
+focused card visible.
+
+The details panel uses the same normalized identity as `/watch`, displays
+compact episode labels, optional local metadata and artwork, live progress,
+and an explicit Watch action. Local art is resolved server-side from the
+catalog-approved feature path and served by an opaque watch endpoint; browser
+responses never contain an artwork filesystem path. After focus settles, a
+muted live preview may lease the shared channel broadcaster. Hidden embedded
+guides release their preview lease.
 
 ## Session lifecycle and cleanup
 

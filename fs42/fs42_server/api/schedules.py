@@ -395,7 +395,11 @@ def _attach_meta(blocks, read_meta: bool = True):
         meta = MetadataIO.read(path) if read_meta else None
         if meta:
             block.meta = meta
-        display = program_display(path, getattr(block, "title", ""), meta)
+        display = program_display(
+            path,
+            getattr(block, "raw_title", None) or getattr(block, "title", ""),
+            meta,
+        )
         for key, value in display.items():
             setattr(block, key, value)
     return blocks

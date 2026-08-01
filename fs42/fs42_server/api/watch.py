@@ -1,6 +1,7 @@
 import asyncio
 import datetime as dt
 import logging
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -98,6 +99,41 @@ async def now(channel: str, request: Request):
         return _now_payload(resolver.now(channel, timestamp), timestamp)
     except WatchError as exc:
         raise _watch_error(exc)
+
+
+@router.get("/channels/{channel}/artwork")
+async def artwork(channel: str, request: Request, at: dt.datetime | None = None):
+    """Serve trusted local artwork for one scheduled program without paths."""
+    try:
+        resolver = _manager(request).resolver
+        airing = resolver.now(channel, at or dt.datetime.now())
+        identity = airing.identity_path or airing.media_path
+        approved = Path(
+            resolver._approved_media_path(resolver.station(channel), identity)
+        )
+    except WatchError as exc:
+        raise _watch_error(exc)
+
+    extensions = (".jpg", ".jpeg", ".png", ".webp")
+    candidates = [approved.with_suffix(ext) for ext in extensions]
+    for directory in (approved.parent, approved.parent.parent):
+        for stem in ("fanart", "backdrop", "thumb", "poster", "folder"):
+            candidates.extend(directory / f"{stem}{ext}" for ext in extensions)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            continue
+        if resolved.is_file() and resolved.parent in {
+            approved.parent.resolve(), approved.parent.parent.resolve()
+        }:
+            media_type, _ = mimetypes.guess_type(resolved.name)
+            return FileResponse(
+                resolved,
+                media_type=media_type or "image/jpeg",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+    raise HTTPException(404, "No local artwork is available for this program")
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)

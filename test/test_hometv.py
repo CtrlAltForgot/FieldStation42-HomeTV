@@ -26,6 +26,7 @@ from fs42.fs42_server.api.watch import (
     PLAYLIST_READY_SEGMENTS,
     SessionRequest,
     _now_payload,
+    artwork as artwork_endpoint,
     channels as channel_endpoint,
     create_session as create_session_endpoint,
 )
@@ -141,6 +142,15 @@ class ResolverTests(unittest.TestCase):
             _attach_meta([block], read_meta=False)
         read.assert_not_called()
         self.assertEqual(block.display_title, "King of the Hill")
+
+    def test_guide_display_prefers_complete_raw_schedule_title(self):
+        block = SimpleNamespace(
+            title="Channel",
+            raw_title="Channel 42 Live Fixture",
+            content=SimpleNamespace(path="/media/channel-42.mp4"),
+        )
+        _attach_meta([block], read_meta=False)
+        self.assertEqual(block.display_title, "Channel 42 Live Fixture")
 
     def test_movie_release_name_keeps_only_title_and_year(self):
         display = _movie_display(
@@ -587,6 +597,51 @@ class SessionTests(unittest.TestCase):
             manager.delete(session.session_id)
             manager.close()
 
+    def test_next_ad_can_prewarm_without_stopping_current_ad(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first_media = root / "first-ad.mkv"
+            second_media = root / "second-ad.mkv"
+            first_media.touch()
+            second_media.touch()
+            boundary = dt.datetime(2026, 7, 31, 18, 30)
+            first = Airing(
+                "42", "Test TV", "Show", "First ad",
+                boundary - dt.timedelta(seconds=30),
+                boundary + dt.timedelta(minutes=30),
+                boundary - dt.timedelta(seconds=30), boundary,
+                str(first_media), 0, 1800, 30, content_type="commercial",
+            )
+            second = Airing(
+                "42", "Test TV", "Show", "Second ad",
+                boundary - dt.timedelta(seconds=30),
+                boundary + dt.timedelta(minutes=30),
+                boundary, boundary + dt.timedelta(seconds=30),
+                str(second_media), 0, 1800, 30, content_type="commercial",
+            )
+            processes = []
+
+            def resolve(_channel, when=None):
+                return second if when == boundary else first
+
+            def factory(command, **_kwargs):
+                process = FakeProcess(command)
+                processes.append(process)
+                return process
+
+            manager = HLSSessionManager(
+                resolver=SimpleNamespace(now=resolve),
+                root=root / "hls", process_factory=factory,
+            )
+            current, _ = manager.create("42")
+            upcoming, _ = manager.create("42", boundary_at=boundary)
+
+            self.assertNotEqual(current.broadcast_id, upcoming.broadcast_id)
+            self.assertEqual(len(processes), 2)
+            self.assertIsNone(processes[0].returncode)
+            self.assertIsNone(processes[1].returncode)
+            manager.close()
+
     def test_channel_limit_evicts_unused_broadcast_for_rapid_tuning(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -620,9 +675,9 @@ class SessionTests(unittest.TestCase):
 
             third, _ = manager.create("3")
 
-            self.assertNotIn(("1", "auto"), manager.broadcasts)
-            self.assertIn(("2", "auto"), manager.broadcasts)
-            self.assertIn(("3", "auto"), manager.broadcasts)
+            self.assertFalse(any(key[:2] == ("1", "auto") for key in manager.broadcasts))
+            self.assertTrue(any(key[:2] == ("2", "auto") for key in manager.broadcasts))
+            self.assertTrue(any(key[:2] == ("3", "auto") for key in manager.broadcasts))
             self.assertEqual(processes[0].returncode, 0)
             self.assertIsNone(processes[1].returncode)
             self.assertIsNone(processes[2].returncode)
@@ -867,6 +922,28 @@ class WatchAPITests(unittest.TestCase):
     def test_channel_list_does_not_expose_paths(self):
         response = asyncio.run(channel_endpoint(self.request))
         self.assertNotIn("path", str(response))
+
+    def test_artwork_endpoint_serves_only_discovered_local_art(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            media = Path(temp_dir) / "Movie.mkv"
+            poster = Path(temp_dir) / "Movie.jpg"
+            media.touch()
+            poster.write_bytes(b"image")
+            airing = SimpleNamespace(identity_path=str(media), media_path=str(media))
+            resolver = SimpleNamespace(
+                now=lambda _channel, _at: airing,
+                station=lambda _channel: {"network_name": "Test TV"},
+                _approved_media_path=lambda _station, path: path,
+            )
+            request = SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        hls_sessions=SimpleNamespace(resolver=resolver)
+                    )
+                )
+            )
+            response = asyncio.run(artwork_endpoint("42", request))
+            self.assertEqual(Path(response.path), poster)
 
     def test_now_payload_uses_series_and_episode_identity(self):
         when = dt.datetime(2026, 7, 31, 12, 0)

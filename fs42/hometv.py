@@ -196,12 +196,13 @@ class StreamSession:
     created_at: float
     last_access: float
     broadcast_id: str = ""
+    broadcast_key: tuple[str, str, str] | None = None
 
 
 @dataclass
 class ChannelBroadcast:
     broadcast_id: str
-    key: tuple[str, str]
+    key: tuple[str, str, str]
     directory: Path
     process: subprocess.Popen
     media_path: str
@@ -241,7 +242,7 @@ class HLSSessionManager:
         )
         self.process_factory = process_factory
         self.sessions: dict[str, StreamSession] = {}
-        self.broadcasts: dict[tuple[str, str], ChannelBroadcast] = {}
+        self.broadcasts: dict[tuple[str, str, str], ChannelBroadcast] = {}
         self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
         # A single production worker owns this cache. Remove only UUID-shaped
@@ -284,7 +285,10 @@ class HLSSessionManager:
                         airing,
                         remaining=min(airing.remaining, wall_remaining),
                     )
-            key = (airing.channel_number, profile)
+            # Include the scheduled item boundary so the next item can be
+            # prewarmed without terminating the broadcaster still serving the
+            # final frames of the current ad.
+            key = (airing.channel_number, profile, airing.item_end.isoformat())
             broadcast = self.broadcasts.get(key)
             if broadcast is not None and (
                 broadcast.process.poll() is not None
@@ -312,6 +316,7 @@ class HLSSessionManager:
                 broadcast.created_at,
                 timestamp,
                 broadcast.broadcast_id,
+                key,
             )
             self.sessions[session_id] = session
             broadcast.leases.add(session_id)
@@ -325,7 +330,7 @@ class HLSSessionManager:
             return session, airing
 
     def _start_broadcast(
-        self, key: tuple[str, str], airing: Airing, profile: str
+        self, key: tuple[str, str, str], airing: Airing, profile: str
     ) -> ChannelBroadcast:
         broadcast_id = str(uuid.uuid4())
         directory = self.root / broadcast_id
@@ -588,7 +593,7 @@ class HLSSessionManager:
             if session is None:
                 raise KeyError(session_id)
             session.last_access = time.monotonic()
-            broadcast = self.broadcasts.get((session.channel, session.profile))
+            broadcast = self.broadcasts.get(session.broadcast_key)
             if broadcast is not None:
                 broadcast.last_access = session.last_access
             return session
@@ -607,7 +612,7 @@ class HLSSessionManager:
             session = self.sessions.pop(session_id, None)
             if session is None:
                 return False
-            key = (session.channel, session.profile)
+            key = session.broadcast_key
             broadcast = self.broadcasts.get(key)
             if broadcast is not None:
                 broadcast.leases.discard(session_id)
@@ -622,7 +627,7 @@ class HLSSessionManager:
             session = self.sessions.get(session_id)
             if session is None:
                 return False
-            self._remove_broadcast((session.channel, session.profile))
+            self._remove_broadcast(session.broadcast_key)
             return True
 
     def ready(self, session_id: str, minimum_segments: int = 3) -> bool:
@@ -663,7 +668,7 @@ class HLSSessionManager:
             ]
             for session_id in expired_leases:
                 session = self.sessions.pop(session_id)
-                broadcast = self.broadcasts.get((session.channel, session.profile))
+                broadcast = self.broadcasts.get(session.broadcast_key)
                 if broadcast is not None:
                     broadcast.leases.discard(session_id)
             expired_broadcasts = [
@@ -699,7 +704,7 @@ class HLSSessionManager:
         self._remove_broadcast(victim.key)
         return True
 
-    def _remove_broadcast(self, key: tuple[str, str]) -> None:
+    def _remove_broadcast(self, key: tuple[str, str, str] | None) -> None:
         broadcast = self.broadcasts.pop(key, None)
         if broadcast is None:
             return

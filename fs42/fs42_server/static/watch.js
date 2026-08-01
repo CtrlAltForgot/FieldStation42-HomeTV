@@ -1,5 +1,6 @@
 (() => {
-  const video = document.querySelector("#video");
+  let video = document.querySelector("#video");
+  let nextVideo = document.querySelector("#video-next");
   const channelSelect = document.querySelector("#channels");
   const message = document.querySelector("#message");
   const progress = document.querySelector("#progress span");
@@ -7,6 +8,7 @@
   let recoveryTimer = null, hlsRecoveryTimer = null;
   let controlsTimer = null, heartbeat = null;
   let boundaryTimer = null;
+  let prefetchTimer = null, prefetchAbort = null, prefetched = null;
   let isTuning = false, tuneAbort = null;
   let recoveryAttempts = 0;
   let hlsNetworkRecoveries = 0, hlsMediaRecoveries = 0;
@@ -83,13 +85,14 @@
     }
   }
 
-  async function attach(url, signal) {
+  async function attach(url, signal, startAtBeginning = false) {
     video.pause();
     // Chromium may report "maybe" for native HLS while failing to decode an
     // MPEG-TS playlist. Prefer HLS.js wherever Media Source is available and
     // reserve native HLS for Safari and other browsers without MSE support.
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({
+        startPosition: startAtBeginning ? 0 : -1,
         liveSyncDurationCount: 1,
         liveMaxLatencyDurationCount: 10,
         maxLiveSyncPlaybackRate: 1.15,
@@ -173,31 +176,119 @@
     tune(channelSelect.value, {boundary: true});
   }
 
+  async function clearPrefetch() {
+    clearTimeout(prefetchTimer);
+    prefetchTimer = null;
+    if (prefetchAbort) { prefetchAbort.abort(); prefetchAbort = null; }
+    if (prefetched?.session_id) {
+      const id = prefetched.session_id;
+      prefetched.hls?.destroy();
+      prefetched = null;
+      nextVideo.pause();
+      nextVideo.removeAttribute("src");
+      await fetch(`/api/watch/sessions/${id}`, {method: "DELETE", keepalive: true}).catch(() => {});
+    }
+  }
+
+  function schedulePrefetch() {
+    clearTimeout(prefetchTimer);
+    if (!nowInfo?.item_end || !channelSelect.value) return;
+    const delay = Math.max(0, Number(nowInfo.item_remaining) * 1000 - 12_000);
+    const channel = String(channelSelect.value);
+    const boundaryAt = nowInfo.item_end;
+    prefetchTimer = setTimeout(async () => {
+      prefetchAbort = new AbortController();
+      let pendingResult = null;
+      let preparedHls = null;
+      try {
+        const result = await api("/api/watch/sessions", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({channel, profile: "auto", boundary_at: boundaryAt}),
+          signal: prefetchAbort.signal
+        });
+        pendingResult = result;
+        if (channelSelect.value !== channel || nowInfo?.item_end !== boundaryAt) {
+          fetch(`/api/watch/sessions/${result.session_id}`, {method: "DELETE", keepalive: true});
+          return;
+        }
+        if (window.Hls && Hls.isSupported()) {
+          preparedHls = new Hls({
+            startPosition: 0,
+            liveSyncDurationCount: 60,
+            maxBufferLength: 30,
+            backBufferLength: 0
+          });
+          preparedHls.loadSource(result.playlist_url);
+          preparedHls.attachMedia(nextVideo);
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Next item manifest was not ready")), 5000);
+            preparedHls.on(Hls.Events.MANIFEST_PARSED, () => { clearTimeout(timeout); resolve(); });
+            preparedHls.on(Hls.Events.ERROR, (_event, data) => {
+              if (data.fatal) { clearTimeout(timeout); reject(new Error(data.details || "Next item HLS failed")); }
+            });
+          });
+        } else if (nextVideo.canPlayType("application/vnd.apple.mpegurl")) {
+          nextVideo.src = result.playlist_url;
+          nextVideo.load();
+        }
+        prefetched = {...result, boundary_at: boundaryAt, hls: preparedHls};
+        pendingResult = null;
+        preparedHls = null;
+      } catch (error) {
+        preparedHls?.destroy();
+        if (pendingResult?.session_id) {
+          fetch(`/api/watch/sessions/${pendingResult.session_id}`, {method: "DELETE", keepalive: true});
+        }
+        if (error.name !== "AbortError") {
+          reportClientEvent("boundary-prefetch-failed", error.message);
+        }
+      } finally {
+        prefetchAbort = null;
+      }
+    }, delay);
+  }
+
   async function tune(channel, {boundary = false} = {}) {
     if (tuneAbort) tuneAbort.abort();
     tuneAbort = new AbortController();
     const signal = tuneAbort.signal;
     isTuning = true;
     const boundaryAt = boundary ? nowInfo?.item_end : null;
+    const prepared = boundary && prefetched?.boundary_at === boundaryAt ? prefetched : null;
+    if (prepared) prefetched = null;
+    else await clearPrefetch();
     if (!boundary) video.classList.add("switching");
     clearTimeout(recoveryTimer);
     message.textContent = boundary ? "" : "Tuning…";
     await stopSession({clearVideo: !boundary});
     try {
-      const result = await api("/api/watch/sessions", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          channel: String(channel),
-          profile: "auto",
-          boundary_at: boundaryAt
-        }),
-        signal
-      });
+      const result = prepared || await api("/api/watch/sessions", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            channel: String(channel),
+            profile: "auto",
+            boundary_at: boundaryAt
+          }),
+          signal
+        });
       sessionId = result.session_id;
       nowInfo = result.now;
       renderNow();
-      const playbackStarted = await attach(result.playlist_url, signal);
+      let playbackStarted;
+      if (prepared) {
+        hls = prepared.hls || null;
+        const outgoing = video;
+        outgoing.id = "video-next";
+        nextVideo.id = "video";
+        video = nextVideo;
+        nextVideo = outgoing;
+        video.volume = Number.isFinite(savedVolume) ? savedVolume : 1;
+        playbackStarted = await requestPlayback();
+      } else {
+        playbackStarted = await attach(result.playlist_url, signal, false);
+      }
       // Playback completion, not wall time, owns item transitions. This late
       // watchdog only recovers a browser that never emits `ended`; it can
       // never truncate buffered commercial frames.
@@ -217,6 +308,7 @@
           fetch(`/api/watch/sessions/${sessionId}/heartbeat`, {method: "POST"});
         }
       }, 20000);
+      schedulePrefetch();
       if (playbackStarted) message.textContent = "";
       localStorage.setItem("fs42-channel", String(channel));
     } catch (error) {
@@ -255,9 +347,12 @@
     if (!channelSelect.value) return;
     try {
       const previousEnd = nowInfo?.end;
-      nowInfo = await api(`/api/watch/channels/${encodeURIComponent(channelSelect.value)}/now`);
-      renderNow();
-      if (previousEnd && previousEnd !== nowInfo.end) tune(channelSelect.value);
+      const updated = await api(`/api/watch/channels/${encodeURIComponent(channelSelect.value)}/now`);
+      if (previousEnd && previousEnd !== updated.end) {
+        nowInfo = updated;
+        renderNow();
+        tune(channelSelect.value);
+      }
     } catch (_) {}
   }
 
@@ -304,8 +399,21 @@
     localStorage.setItem("fs42-volume", String(video.volume));
   };
   document.querySelector("#fullscreen").onclick = () => document.querySelector("#viewer").requestFullscreen();
-  document.querySelector("#guide-button").onclick = () => document.querySelector("#guide").hidden = false;
-  document.querySelector("#guide-close").onclick = () => document.querySelector("#guide").hidden = true;
+  function setGuideVisible(visible) {
+    const guide = document.querySelector("#guide");
+    guide.hidden = !visible;
+    guide.querySelector("iframe")?.contentWindow?.postMessage(
+      {type: visible ? "fs42-guide-shown" : "fs42-guide-hidden"},
+      window.location.origin
+    );
+  }
+  document.querySelector("#guide-button").onclick = () => setGuideVisible(true);
+  document.querySelector("#guide-close").onclick = () => setGuideVisible(false);
+  window.addEventListener("message", event => {
+    if (event.origin === window.location.origin && event.data?.type === "fs42-guide-close") {
+      setGuideVisible(false);
+    }
+  });
   document.addEventListener("mousemove", showControls);
   document.addEventListener("click", showControls);
   document.addEventListener("click", () => {
@@ -326,7 +434,8 @@
     if (event.key.toLowerCase() === "f") document.querySelector("#fullscreen").click();
     if (event.key.toLowerCase() === "g") document.querySelector("#guide-button").click();
   });
-  video.addEventListener("error", () => {
+  function handleVideoError(event) {
+    if (event.currentTarget !== video) return;
     const errorDetail = {
       code: video.error?.code,
       message: video.error?.message
@@ -334,8 +443,9 @@
     console.error("Video element error", errorDetail);
     reportClientEvent("video-error", JSON.stringify(errorDetail));
     recover();
-  });
-  video.addEventListener("playing", () => {
+  }
+  function handlePlaying(event) {
+    if (event.currentTarget !== video) return;
     clearTimeout(hlsRecoveryTimer);
     recoveryAttempts = 0;
     hlsNetworkRecoveries = 0;
@@ -349,9 +459,15 @@
       }, 100);
     }
     requestAnimationFrame(() => video.classList.remove("switching"));
-  });
-  video.addEventListener("ended", transitionAfterPlayback);
-  window.addEventListener("pagehide", stopSession);
+  }
+  for (const player of [video, nextVideo]) {
+    player.addEventListener("error", handleVideoError);
+    player.addEventListener("playing", handlePlaying);
+    player.addEventListener("ended", event => {
+      if (event.currentTarget === video) transitionAfterPlayback();
+    });
+  }
+  window.addEventListener("pagehide", () => { clearPrefetch(); stopSession(); });
   setInterval(() => {
     if (nowInfo) {
       const elapsed = (Date.now() - Date.parse(nowInfo.server_time)) / 1000 + nowInfo.elapsed;

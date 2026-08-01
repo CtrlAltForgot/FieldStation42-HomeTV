@@ -10,7 +10,8 @@
 </head>
 <body>
   <main id="viewer">
-    <video id="video" autoplay playsinline></video>
+    <video id="video" class="stream-video" autoplay playsinline></video>
+    <video id="video-next" class="stream-video" muted playsinline aria-hidden="true"></video>
     <div id="shade"></div>
     <section id="status" class="panel" aria-live="polite">
       <div id="channel-badge">
@@ -55,7 +56,7 @@
     </section>
     <aside id="guide" class="panel" hidden>
       <header><strong>Program guide</strong><button id="guide-close">×</button></header>
-      <iframe src="/static/guide_frame.html" title="Program guide"></iframe>
+      <iframe src="/static/guide_frame.html?embedded=watch" title="Program guide"></iframe>
     </aside>
     <div id="message">Connecting to FieldStation42…</div>
   </main>

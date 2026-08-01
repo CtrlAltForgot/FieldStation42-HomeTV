@@ -14,7 +14,9 @@ html, body, #viewer {
   overflow: hidden;
   background: #030405;
 }
-#video {
+.stream-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -23,6 +25,7 @@ html, body, #viewer {
   transition: opacity .45s ease;
 }
 #video.switching { opacity: 0; }
+#video-next { visibility: hidden; }
 #shade {
   position: fixed;
   inset: 0;
@@ -258,37 +261,40 @@ body.muted .volume-off { display: block; }
 }
 
 #guide {
-  inset: 5vh 5vw;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  background: rgba(7, 10, 15, .95);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
-  backdrop-filter: blur(26px);
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #05080d;
 }
 #guide header {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  right: 12px;
   height: 40px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-left: 6px;
+  padding: 0;
 }
+#guide header strong { display: none; }
 #guide-close {
   width: 34px;
   height: 34px;
   border: 0;
   border-radius: 50%;
   color: #fff;
-  background: transparent;
+  background: rgba(4, 8, 13, .7);
   font-size: 24px;
   cursor: pointer;
 }
 #guide-close:hover { background: rgba(255, 255, 255, .1); }
 #guide iframe {
   width: 100%;
-  height: calc(100% - 40px);
+  height: 100%;
   border: 0;
-  border-radius: 14px;
+  border-radius: 0;
   background: #111;
 }
 #message {
