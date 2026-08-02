@@ -7,9 +7,7 @@ commercials, bumpers, and optional free live-news sources into numbered
 channels with a continuous schedule. Open the guide, choose a channel, and join
 whatever is airing—no episode picker required.
 
-![A cable box next to a television](docs/cable_cover_3.png)
-
-## Why myHomeTV?
+## What are the benefits of using myHomeTV?
 
 Media servers are excellent at helping you choose something. myHomeTV is for
 the times when you do not want to choose. It recreates the comfortable parts of
