@@ -25,10 +25,12 @@ sub runRequest()
         m.top.error = "Could not start the network request"
         return
     end if
-    message = Wait(15000, port)
+    timeoutMs = m.top.timeoutMs
+    if timeoutMs <= 0 then timeoutMs = 25000
+    message = Wait(timeoutMs, port)
     if type(message) <> "roUrlEvent"
         transfer.AsyncCancel()
-        m.top.error = "The myHomeTV server did not respond within 15 seconds"
+        m.top.error = "The myHomeTV server did not respond in time"
         return
     end if
     m.top.statusCode = message.GetResponseCode()

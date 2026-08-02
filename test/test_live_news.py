@@ -315,7 +315,8 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         manifest = open("clients/roku/manifest", encoding="utf-8").read()
         webos = open("clients/webos/app.js", encoding="utf-8").read()
         self.assertIn("requires_network=1", manifest)
-        self.assertIn("Wait(15000, port)", request)
+        self.assertIn("Wait(timeoutMs, port)", request)
+        self.assertIn("if timeoutMs <= 0 then timeoutMs = 25000", request)
         self.assertIn("AsyncGetToString", request)
         self.assertIn("program.artwork_url", roku)
         self.assertIn("item.artwork_url", webos)
@@ -414,7 +415,7 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("refreshGuideSelection()", roku)
         self.assertIn('/prewarm"', roku)
         self.assertIn("cancelPendingTune()", roku)
-        self.assertIn("event.GetRoSGNode() <> m.playTask", roku)
+        self.assertIn("isCurrentTuneTask(task)", roku)
         self.assertGreaterEqual(
             roku.count('FindNode("status").text = ""'), 3
         )
@@ -437,13 +438,16 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn('m.guideLayer.visible = true', roku)
         self.assertIn('m.guideLayer.visible = false', roku)
 
-    def test_roku_channel_changes_are_double_buffered_and_guide_wraps(self):
+    def test_roku_channel_changes_use_one_hardware_decoder_and_guide_wraps(self):
         roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
         scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
         self.assertIn('id="videoA"', scene)
-        self.assertIn('id="videoB"', scene)
+        self.assertNotIn('id="videoB"', scene)
         self.assertIn('if state = "playing"', roku)
         self.assertIn("finishBufferedTune(which, node)", roku)
+        self.assertIn("target = m.videoA", roku)
+        self.assertIn("m.decoderSwitchStarted = true", roku)
+        self.assertIn('backdrop.visible = true', roku)
         tune = roku[roku.index("sub tuneCurrentChannel()"):
                     roku.index("sub onPlaybackReady")]
         self.assertNotIn("stopPlayback()", tune)
@@ -457,7 +461,7 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn('id="hudArtwork"', scene)
         tune = roku[roku.index("sub tuneCurrentChannel()"):
                     roku.index("sub onPlaybackReady")]
-        self.assertLess(tune.index("showTuningHud()"), tune.index('m.playTask.control = "run"'))
+        self.assertLess(tune.index("beginTunePresentation()"), tune.index('m.playTask.control = "run"'))
         self.assertIn('FindNode("hudStatus").text = "TUNING"', roku)
         self.assertIn("prewarmAdjacentChannels()", roku)
         self.assertIn("m.adjacentTimer.duration = 20", roku)
@@ -470,10 +474,58 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("row.previous_tunable_index", roku)
         self.assertIn("m.activeChannel", roku)
         self.assertIn("m.pendingChannel", roku)
-        self.assertIn("event.GetRoSGNode() <> m.playTask", roku)
+        self.assertIn("isCurrentTuneTask(task)", roku)
         self.assertIn('m.playTask.ObserveField("error", "onTuneError")', roku)
         self.assertIn("m.currentChannel = m.activeChannel", roku)
         self.assertIn("This channel is the myHomeTV program guide", roku)
+
+    def test_roku_tuning_callbacks_use_request_ids_and_have_a_watchdog(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        task = open("clients/roku/components/RequestTask.xml", encoding="utf-8").read()
+        request = open("clients/roku/components/RequestTask.brs", encoding="utf-8").read()
+        self.assertIn('field id="requestId" type="integer"', task)
+        self.assertIn("m.playTask.requestId = m.tuneRequestId", roku)
+        self.assertIn("isCurrentTuneTask(task)", roku)
+        self.assertNotIn("event.GetRoSGNode() <> m.playTask", roku)
+        self.assertIn('m.tuneTimer.ObserveField("fire", "onTuneTimeout")', roku)
+        self.assertIn('failPendingTune("CHANNEL UNAVAILABLE")', roku)
+        self.assertIn("timeoutMs = m.top.timeoutMs", request)
+
+    def test_roku_guide_selection_immediately_presents_the_new_channel(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        scene = open("clients/roku/components/MainScene.xml", encoding="utf-8").read()
+        tune = roku[roku.index("sub tuneCurrentChannel()"):
+                    roku.index("sub onPlaybackReady")]
+        self.assertIn('id="tuningBackdrop"', scene)
+        self.assertLess(tune.index("beginTunePresentation()"),
+                        tune.index('m.playTask.control = "run"'))
+        self.assertIn('m.guideLayer.visible = false', roku)
+        self.assertIn('FindNode("hudStatus").text = "TUNING"', roku)
+        self.assertIn('FindNode("tuningBackdrop").visible = false', roku)
+
+    def test_roku_remote_remains_active_during_initial_tune(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        manifest = open("clients/roku/manifest", encoding="utf-8").read()
+        self.assertIn(
+            'not m.guideVisible and (m.inPlayer or m.isTuning or m.pendingVideoId <> "")',
+            roku,
+        )
+        self.assertIn('key = "fastforward"', roku)
+        self.assertIn('key = "rewind"', roku)
+        self.assertIn("cancelPendingTune()", roku)
+        self.assertIn("refreshGuideSelection()", roku)
+        self.assertIn("build_version=1", manifest)
+
+    def test_roku_deep_link_waits_for_guide_before_tuning(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        loaded = roku[roku.index("sub onGuideLoaded(event)"):
+                      roku.index("sub refreshGuideSelection()")]
+        launch = roku[roku.index("sub onLaunchChannel()"):
+                      roku.index("function onKeyEvent")]
+        self.assertIn("m.pendingLaunchChannel", roku)
+        self.assertIn("tunePendingLaunchChannel()", loaded)
+        self.assertIn('if m.pendingLaunchChannel = "" or m.rows.Count() = 0 then return', launch)
+        self.assertIn("tuneCurrentChannel()", launch)
 
     def test_web_and_roku_guides_share_one_complete_lineup(self):
         guide = open("fs42/fs42_server/static/guide.js", encoding="utf-8").read()

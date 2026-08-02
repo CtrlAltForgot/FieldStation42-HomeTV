@@ -3,11 +3,12 @@ sub init()
     registry = CreateObject("roRegistrySection", "myHomeTV")
     if registry.Exists("server") then m.server = registry.Read("server")
     m.videoA = m.top.FindNode("videoA")
-    m.videoB = m.top.FindNode("videoB")
     m.video = m.videoA
     m.activeVideoId = ""
     m.pendingVideoId = ""
     m.pendingSessionId = ""
+    m.replacedSessionId = ""
+    m.decoderSwitchStarted = false
     m.pendingHudTitle = ""
     m.pendingArtwork = ""
     m.activeHudTitle = ""
@@ -15,9 +16,13 @@ sub init()
     m.activeChannel = -1
     m.pendingChannel = -1
     m.playTask = invalid
+    m.tuneRequestId = 0
+    m.tuneTimer = CreateObject("roSGNode", "Timer")
+    m.tuneTimer.duration = 25
+    m.tuneTimer.repeat = false
+    m.tuneTimer.ObserveField("fire", "onTuneTimeout")
     m.guideLayer = m.top.FindNode("guideLayer")
     m.videoA.ObserveField("state", "onVideoAState")
-    m.videoB.ObserveField("state", "onVideoBState")
     m.rows = []
     m.currentChannel = 0
     m.currentProgram = 0
@@ -27,6 +32,7 @@ sub init()
     m.trackWidth = 1490
     m.autoFollowNow = true
     m.guideLoadedSeconds = 0
+    m.pendingLaunchChannel = ""
     m.sessionId = ""
     m.inPlayer = false
     m.isTuning = false
@@ -82,6 +88,7 @@ sub onGuideLoaded(event)
     m.top.SetFocus(true)
     refreshGuideSelection()
     renderTimeline()
+    tunePendingLaunchChannel()
 end sub
 
 sub refreshGuideSelection()
@@ -374,21 +381,26 @@ sub tuneCurrentChannel()
         return
     end if
     m.pendingChannel = m.currentChannel
-    showTuningHud()
     m.isTuning = true
+    m.tuneRequestId = m.tuneRequestId + 1
+    beginTunePresentation()
     m.top.FindNode("status").text = "Tuning channel " + row.channel_number + "…"
     m.playTask = CreateObject("roSGNode", "RequestTask")
+    m.playTask.requestId = m.tuneRequestId
+    m.playTask.timeoutMs = 25000
     m.playTask.url = m.server + "/api/watch/sessions"
     m.playTask.method = "POST"
     m.playTask.body = FormatJson({channel: row.channel_number, profile: "auto", subtitles: "auto", client: "roku"})
     m.playTask.ObserveField("response", "onPlaybackReady")
     m.playTask.ObserveField("error", "onTuneError")
     m.playTask.control = "run"
+    m.tuneTimer.control = "stop"
+    m.tuneTimer.control = "start"
 end sub
 
 sub onPlaybackReady(event)
-    if not m.isTuning or m.playTask = invalid then return
-    if event.GetRoSGNode() <> m.playTask then return
+    task = event.GetRoSGNode()
+    if not isCurrentTuneTask(task) then return
     m.isTuning = false
     m.playTask = invalid
     result = event.GetData()
@@ -413,13 +425,16 @@ sub onPlaybackReady(event)
     end if
     m.pendingSessionId = ""
     if result.session_id <> invalid then m.pendingSessionId = result.session_id
-    if m.activeVideoId = "A"
-        target = m.videoB
-        m.pendingVideoId = "B"
-    else
-        target = m.videoA
-        m.pendingVideoId = "A"
-    end if
+    ' Many Roku televisions expose only one reliable hardware decoder. Keep the
+    ' old picture running while the server prepares the new session, then reuse
+    ' that decoder behind show-specific artwork for the brief player handoff.
+    target = m.videoA
+    m.pendingVideoId = "A"
+    m.replacedSessionId = m.sessionId
+    m.decoderSwitchStarted = true
+    backdrop = m.top.FindNode("tuningBackdrop")
+    if m.pendingArtwork <> invalid and m.pendingArtwork <> "" then backdrop.uri = m.server + m.pendingArtwork
+    backdrop.visible = true
     target.control = "stop"
     target.opacity = 0
     target.mute = true
@@ -432,10 +447,6 @@ end sub
 
 sub onVideoAState(event)
     handleVideoState("A", m.videoA, event.GetData())
-end sub
-
-sub onVideoBState(event)
-    handleVideoState("B", m.videoB, event.GetData())
 end sub
 
 sub handleVideoState(which as String, node as Object, state as String)
@@ -453,21 +464,16 @@ sub handleVideoState(which as String, node as Object, state as String)
 end sub
 
 sub finishBufferedTune(which as String, node as Object)
-    oldVideo = m.video
-    oldVideoId = m.activeVideoId
-    oldSessionId = m.sessionId
+    oldSessionId = m.replacedSessionId
     node.opacity = 1
     node.visible = true
-    if oldVideoId <> "" and oldVideoId <> which
-        oldVideo.control = "stop"
-        oldVideo.visible = false
-        oldVideo.opacity = 1
-    end if
     node.mute = false
     m.video = node
     m.activeVideoId = which
     m.sessionId = m.pendingSessionId
     m.pendingSessionId = ""
+    m.replacedSessionId = ""
+    m.decoderSwitchStarted = false
     m.pendingVideoId = ""
     m.top.FindNode("hudTitle").text = m.pendingHudTitle
     m.top.FindNode("hudStatus").text = ""
@@ -479,8 +485,14 @@ sub finishBufferedTune(which as String, node as Object)
     m.pendingChannel = -1
     m.pendingHudTitle = ""
     m.pendingArtwork = ""
+    m.tuneTimer.control = "stop"
+    m.top.FindNode("tuningBackdrop").visible = false
     m.inPlayer = true
-    closeGuideOverlay()
+    if m.guideVisible
+        refreshGuideSelection()
+    else
+        closeGuideOverlay()
+    end if
     showPlayerHud()
     prewarmAdjacentChannels()
     m.adjacentTimer.control = "stop"
@@ -502,6 +514,22 @@ sub showTuningHud()
     m.top.FindNode("hudStatus").text = "TUNING"
     if m.pendingArtwork <> invalid and m.pendingArtwork <> "" then m.top.FindNode("hudArtwork").uri = m.server + m.pendingArtwork
     m.top.FindNode("playerHud").visible = true
+end sub
+
+sub beginTunePresentation()
+    ' Selecting from the guide should feel like changing a cable channel:
+    ' acknowledge the new channel immediately, then swap video when ready.
+    if m.guideVisible
+        m.guideVisible = false
+        m.guideLayer.visible = false
+    end if
+    backdrop = m.top.FindNode("tuningBackdrop")
+    if not m.inPlayer
+        if m.pendingArtwork <> invalid and m.pendingArtwork <> "" then backdrop.uri = m.server + m.pendingArtwork
+        backdrop.visible = true
+    end if
+    showTuningHud()
+    m.top.SetFocus(true)
 end sub
 
 sub hidePlayerHud()
@@ -532,25 +560,34 @@ end sub
 sub cancelPendingTune()
     if not m.isTuning and m.pendingVideoId = "" and m.playTask = invalid and m.pendingChannel < 0 then return
     m.isTuning = false
+    m.tuneTimer.control = "stop"
     if m.playTask <> invalid then m.playTask.control = "stop"
     m.playTask = invalid
+    switchedDecoder = m.decoderSwitchStarted
     if m.pendingVideoId = "A"
         m.videoA.control = "stop"
         m.videoA.visible = false
         m.videoA.opacity = 1
         m.videoA.mute = false
-    else if m.pendingVideoId = "B"
-        m.videoB.control = "stop"
-        m.videoB.visible = false
-        m.videoB.opacity = 1
-        m.videoB.mute = false
     end if
     cleanupSession(m.pendingSessionId)
+    if switchedDecoder
+        cleanupSession(m.replacedSessionId)
+        m.sessionId = ""
+        m.activeVideoId = ""
+        m.activeChannel = -1
+        m.activeHudTitle = ""
+        m.activeArtwork = ""
+        m.inPlayer = false
+    end if
     m.pendingSessionId = ""
+    m.replacedSessionId = ""
+    m.decoderSwitchStarted = false
     m.pendingVideoId = ""
     m.pendingChannel = -1
     m.pendingHudTitle = ""
     m.pendingArtwork = ""
+    m.top.FindNode("tuningBackdrop").visible = false
     if m.inPlayer
         m.currentChannel = m.activeChannel
         m.top.FindNode("hudTitle").text = m.activeHudTitle
@@ -573,15 +610,16 @@ sub stopPlayback()
     cancelPendingTune()
     m.videoA.control = "stop"
     m.videoA.visible = false
-    m.videoB.control = "stop"
-    m.videoB.visible = false
     m.top.FindNode("playerHud").visible = false
+    m.top.FindNode("tuningBackdrop").visible = false
     m.adjacentTimer.control = "stop"
     m.top.FindNode("status").text = ""
     m.inPlayer = false
     cleanupSession(m.sessionId)
     m.sessionId = ""
     m.activeVideoId = ""
+    m.replacedSessionId = ""
+    m.decoderSwitchStarted = false
     m.activeChannel = -1
     m.pendingChannel = -1
     m.activeHudTitle = ""
@@ -594,13 +632,27 @@ sub failPendingTune(message as String)
         m.top.FindNode("hudStatus").text = message
         showPlayerHud()
     else
+        m.guideVisible = true
+        m.guideLayer.visible = true
         m.top.FindNode("status").text = message
+        m.top.SetFocus(true)
     end if
 end sub
 
 sub onTuneError(event)
-    if m.playTask = invalid or event.GetRoSGNode() <> m.playTask then return
+    task = event.GetRoSGNode()
+    if not isCurrentTuneTask(task) then return
     failPendingTune("TUNE FAILED")
+end sub
+
+function isCurrentTuneTask(task as Object) as Boolean
+    if task = invalid or not m.isTuning then return false
+    return task.requestId = m.tuneRequestId
+end function
+
+sub onTuneTimeout()
+    if not m.isTuning and m.pendingVideoId = "" then return
+    failPendingTune("CHANNEL UNAVAILABLE")
 end sub
 
 sub onRequestError(event)
@@ -646,22 +698,39 @@ sub changeChannel(delta as Integer)
 end sub
 
 sub onLaunchChannel()
-    if m.top.launchChannel = "" or m.rows.Count() = 0 then return
+    if m.top.launchChannel = "" then return
+    m.pendingLaunchChannel = m.top.launchChannel
+    tunePendingLaunchChannel()
+end sub
+
+sub tunePendingLaunchChannel()
+    if m.pendingLaunchChannel = "" or m.rows.Count() = 0 then return
     for index = 0 to m.rows.Count() - 1
-        if m.rows[index].channel_number = m.top.launchChannel
+        if m.rows[index].channel_number = m.pendingLaunchChannel
+            m.pendingLaunchChannel = ""
             m.currentChannel = index
             m.currentProgram = 0
             tuneCurrentChannel()
             return
         end if
     end for
+    m.pendingLaunchChannel = ""
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
-    if m.inPlayer and not m.guideVisible
+    playerTransitionActive = not m.guideVisible and (m.inPlayer or m.isTuning or m.pendingVideoId <> "")
+    if playerTransitionActive
         if key = "back"
-            showGuideOverlay()
+            if m.inPlayer
+                showGuideOverlay()
+            else
+                cancelPendingTune()
+                m.guideVisible = true
+                m.guideLayer.visible = true
+                m.top.SetFocus(true)
+                refreshGuideSelection()
+            end if
             return true
         else if key = "fastforward" or key = "fwd" or key = "next" or key = "skipforward" or key = "skipnext" or key = "tracknext" or key = "channelup" or key = "right" or key = "up"
             changeChannel(1)

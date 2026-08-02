@@ -4,10 +4,11 @@
     <field id="url" type="string" />
     <field id="method" type="string" value="GET" />
     <field id="body" type="string" />
+    <field id="requestId" type="integer" />
+    <field id="timeoutMs" type="integer" value="25000" />
     <field id="response" type="assocarray" alwaysNotify="true" />
     <field id="statusCode" type="integer" />
     <field id="error" type="string" alwaysNotify="true" />
   </interface>
   <script type="text/brightscript" uri="pkg:/components/RequestTask.brs" />
 </component>
-
