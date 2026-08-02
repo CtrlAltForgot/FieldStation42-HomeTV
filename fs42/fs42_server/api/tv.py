@@ -64,6 +64,9 @@ def _compact_tv_program(
         or _field(program, "title", ""),
         "program_details": _field(program, "program_details", ""),
         "program_description": description,
+        "year": metadata.get("year") or metadata.get("release_year") or "",
+        "rating": metadata.get("rating") or metadata.get("content_rating") or "",
+        "genre": metadata.get("genre") or metadata.get("genres") or "",
         "start_time": _iso(starts),
         "end_time": _iso(ends),
         "guide_start_minute": (starts - guide_start).total_seconds() / 60,
@@ -133,6 +136,19 @@ def _station_placeholder(station: dict, start: dt.datetime, end: dt.datetime) ->
         ),
         "airing_kind": station_type,
     }
+
+
+def tunable_neighbor(rows: list[dict], current: int, delta: int) -> int:
+    """Return the next playable row, wrapping exactly once in either direction."""
+    if not rows or current < 0 or current >= len(rows) or delta == 0:
+        return current
+    step = 1 if delta > 0 else -1
+    candidate = current
+    for _ in range(len(rows)):
+        candidate = (candidate + step) % len(rows)
+        if rows[candidate].get("is_tunable"):
+            return candidate
+    return current
 
 
 @router.get("/config")
@@ -244,6 +260,9 @@ async def guide(hours: int = Query(6, ge=1, le=24)):
             0, int(row["channel_number"])
         ) if row["channel_number"].isdigit() else (1, row["channel_number"])
     )
+    for index, row in enumerate(rows):
+        row["previous_tunable_index"] = tunable_neighbor(rows, index, -1)
+        row["next_tunable_index"] = tunable_neighbor(rows, index, 1)
     return {
         "start": _iso(start),
         "end": _iso(end),

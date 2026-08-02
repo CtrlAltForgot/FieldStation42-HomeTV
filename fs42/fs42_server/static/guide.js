@@ -69,24 +69,16 @@
   async function load() {
     $("#guide-message").hidden = false;
     resetWindow();
-    const all = await window.fs42Common.fetchStationSummary();
-    state.stations = all
-      .filter(item => !item.hidden && (item._has_schedule || item.is_live_source))
-      .sort((a, b) => String(a.channel_number).localeCompare(String(b.channel_number), undefined, {numeric: true}));
-    const extendedStart = new Date(state.start.getTime() - 3 * 60 * 60_000);
-    state.rows = [];
-    // Bound browser/API concurrency on large channel lineups while retaining
-    // parallel loading. Six short SQLite readers keeps guide startup brisk
-    // without creating a request storm on a small home server.
-    for (let index = 0; index < state.stations.length; index += 6) {
-      const batch = await Promise.all(state.stations.slice(index, index + 6).map(async station => ({
-        station,
-        blocks: await window.fs42Common.fetchSchedule(
-          station.network_name, dateForApi(extendedStart), dateForApi(state.end), true, true
-        )
-      })));
-      state.rows.push(...batch);
-    }
+    // All clients consume one server-built lineup. This keeps schedule-less
+    // Guide/Web/Streaming stations and tunability identical on web, Roku and LG.
+    const payload = await api(`/api/tv/guide?hours=${WINDOW_MINUTES / 60}`);
+    state.start = new Date(payload.start);
+    state.end = new Date(payload.end);
+    state.stations = payload.channels || [];
+    state.rows = state.stations.map(station => ({
+      station,
+      blocks: station.programs || []
+    }));
     state.rows.forEach(row => {
       row.visibleBlocks = row.blocks.filter(block => {
         const start = new Date(block.start_time);
@@ -274,15 +266,16 @@
     $("#preview-title").textContent = programTitle(block);
     const facts = [`${formatTime(start)}–${formatTime(end)}`];
     if (block.program_details) facts.push(block.program_details);
-    if (meta.year) facts.push(meta.year);
-    if (meta.rating) facts.push(meta.rating);
-    if (meta.genre) facts.push(Array.isArray(meta.genre) ? meta.genre[0] : meta.genre);
+    if (block.year || meta.year) facts.push(block.year || meta.year);
+    if (block.rating || meta.rating) facts.push(block.rating || meta.rating);
+    const genre = block.genre || meta.genre;
+    if (genre) facts.push(Array.isArray(genre) ? genre[0] : genre);
     $("#preview-meta").textContent = facts.filter(Boolean).join("  ·  ");
-    $("#preview-description").textContent = text(meta.plot || meta.description || meta.outline, "Program information is not available yet.");
+    $("#preview-description").textContent = text(block.program_description || meta.plot || meta.description || meta.outline, "Program information is not available yet.");
     $("#preview-status").textContent = live ? "ON NOW" : "LATER";
     $("#preview-status").classList.toggle("upcoming", !live);
-    $("#watch-button").hidden = !live;
-    $("#preview-progress").hidden = !live;
+    $("#watch-button").hidden = !live || station.is_tunable === false;
+    $("#preview-progress").hidden = !live || station.is_tunable === false;
     updateProgress();
     loadPreviewArtwork(station, block);
   }
@@ -344,6 +337,7 @@
     clearTimeout(state.previewTimer);
     stopPreview();
     if (!state.previewEnabled || !state.previewActive || !state.selected) return;
+    if (state.selected.row.station.is_tunable === false) return;
     const start = new Date(state.selected.block.start_time);
     const end = new Date(state.selected.block.end_time);
     if (!(start <= new Date() && end > new Date())) return;
@@ -454,6 +448,7 @@
 
   function watchSelected() {
     if (!state.selected) return;
+    if (state.selected.row.station.is_tunable === false) return;
     const start = new Date(state.selected.block.start_time);
     const end = new Date(state.selected.block.end_time);
     if (start <= new Date() && end > new Date()) {

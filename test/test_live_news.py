@@ -211,9 +211,33 @@ class LiveNewsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(len(row["programs"]) == 1 for row in result["channels"]))
         self.assertTrue(all(not row["is_tunable"] for row in result["channels"]))
         self.assertEqual(
+            [row["next_tunable_index"] for row in result["channels"]],
+            [0, 1, 2],
+        )
+        self.assertEqual(
             result["channels"][0]["programs"][0]["program_details"],
             "Program guide",
         )
+
+    async def test_tv_guide_links_playable_neighbors_around_guide_station(self):
+        first = self.station(SOURCES[0], 20)
+        guide_station = {
+            "network_name": "Grandma Guide",
+            "channel_number": 30,
+            "network_type": "guide",
+            "_has_schedule": False,
+            "_has_catalog": False,
+        }
+        last = self.station(SOURCES[1], 40)
+        manager = FakeStationManager([first, guide_station, last])
+        with patch("fs42.fs42_server.api.tv.StationManager", return_value=manager), patch(
+            "fs42.fs42_server.api.schedules.StationManager", return_value=manager
+        ):
+            result = await tv_guide(6)
+        rows = result["channels"]
+        self.assertEqual([row["is_tunable"] for row in rows], [True, False, True])
+        self.assertEqual([row["next_tunable_index"] for row in rows], [2, 2, 0])
+        self.assertEqual([row["previous_tunable_index"] for row in rows], [2, 0, 0])
 
     def test_resolver_lists_scheduleless_channels_and_artwork_is_channel_specific(self):
         station = {
@@ -351,7 +375,7 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         ):
             page = open(path, encoding="utf-8").read()
             self.assertIn("guide_frame.html?", page)
-            self.assertIn("v=myhometv-20260801-identity-1", page)
+            self.assertIn("v=myhometv-20260801-channel-nav-1", page)
 
     def test_live_news_cannot_trap_pc_navigation(self):
         watch_html = open(
@@ -390,7 +414,7 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("refreshGuideSelection()", roku)
         self.assertIn('/prewarm"', roku)
         self.assertIn("cancelPendingTune()", roku)
-        self.assertIn("if not m.isTuning then return", roku)
+        self.assertIn("event.GetRoSGNode() <> m.playTask", roku)
         self.assertGreaterEqual(
             roku.count('FindNode("status").text = ""'), 3
         )
@@ -438,6 +462,25 @@ class LiveNewsStaticContractTests(unittest.TestCase):
         self.assertIn("prewarmAdjacentChannels()", roku)
         self.assertIn("m.adjacentTimer.duration = 20", roku)
         self.assertIn("m.adjacentTimer.repeat = true", roku)
+
+    def test_roku_channel_surfing_uses_server_neighbors_and_rejects_stale_tunes(self):
+        roku = open("clients/roku/components/MainScene.brs", encoding="utf-8").read()
+        self.assertIn("function playableNeighbor", roku)
+        self.assertIn("row.next_tunable_index", roku)
+        self.assertIn("row.previous_tunable_index", roku)
+        self.assertIn("m.activeChannel", roku)
+        self.assertIn("m.pendingChannel", roku)
+        self.assertIn("event.GetRoSGNode() <> m.playTask", roku)
+        self.assertIn('m.playTask.ObserveField("error", "onTuneError")', roku)
+        self.assertIn("m.currentChannel = m.activeChannel", roku)
+        self.assertIn("This channel is the myHomeTV program guide", roku)
+
+    def test_web_and_roku_guides_share_one_complete_lineup(self):
+        guide = open("fs42/fs42_server/static/guide.js", encoding="utf-8").read()
+        self.assertIn("/api/tv/guide?hours=", guide)
+        self.assertIn("station.programs || []", guide)
+        self.assertNotIn("item._has_schedule || item.is_live_source", guide)
+        self.assertIn("station.is_tunable === false", guide)
 
     def test_tv_client_packages_have_required_manifests(self):
         manifest = open("clients/roku/manifest", encoding="utf-8").read()

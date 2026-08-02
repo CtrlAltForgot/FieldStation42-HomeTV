@@ -45,6 +45,7 @@ from fs42.fs42_server.api.tv import (
     _compact_tv_program,
     guide_card_rect,
     roku_card_rect,
+    tunable_neighbor,
 )
 from fs42.fs42_server.api.schedules import (
     _attach_meta,
@@ -2097,6 +2098,27 @@ class WatchAPITests(unittest.TestCase):
 
 
 class TVGuideAPITests(unittest.TestCase):
+    def test_tunable_neighbors_skip_display_rows_and_wrap_both_directions(self):
+        rows = [
+            {"channel": 2, "is_tunable": True},
+            {"channel": 3, "is_tunable": False},
+            {"channel": 4, "is_tunable": False},
+            {"channel": 20, "is_tunable": True},
+        ]
+        self.assertEqual(tunable_neighbor(rows, 0, 1), 3)
+        self.assertEqual(tunable_neighbor(rows, 3, 1), 0)
+        self.assertEqual(tunable_neighbor(rows, 0, -1), 3)
+        self.assertEqual(tunable_neighbor(rows, 3, -1), 0)
+
+    def test_tunable_neighbor_stays_put_when_no_playable_alternative_exists(self):
+        rows = [
+            {"is_tunable": True},
+            {"is_tunable": False},
+            {"is_tunable": False},
+        ]
+        self.assertEqual(tunable_neighbor(rows, 0, 1), 0)
+        self.assertEqual(tunable_neighbor(rows, 1, -1), 0)
+
     def test_compact_program_keeps_summary_and_timeline_geometry(self):
         start = dt.datetime(2026, 8, 1, 16, 0)
         program = SimpleNamespace(
