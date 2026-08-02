@@ -116,12 +116,31 @@
 .station-card-actions {
     margin-top: 1em;
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5em;
 }
 
 .station-card-actions .pure-button {
-    flex: 1;
+    flex: 1 1 7.5em;
     text-align: center;
+}
+
+.station-card-actions .button-delete {
+    background: #7f1d1d;
+    border: 1px solid #b91c1c;
+    color: #fff;
+}
+
+.station-card-actions .button-delete:hover,
+.station-card-actions .button-delete:focus {
+    background: #991b1b;
+    border-color: #ef4444;
+}
+
+.station-card-actions .button-delete:disabled {
+    background: #4b2020;
+    border-color: #633;
+    color: #c9a5a5;
 }
 
 /* Filter bar */

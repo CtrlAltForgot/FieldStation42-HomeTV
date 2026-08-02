@@ -196,6 +196,9 @@
                             <button class="pure-button" data-name="${escapeHtml(station.network_name)}" onclick="duplicateStation(this.dataset.name)">
                                 Duplicate
                             </button>
+                            <button class="pure-button button-delete" data-name="${escapeHtml(station.network_name)}" onclick="deleteStation(this.dataset.name, this)">
+                                Delete
+                            </button>
                         </div>
                     </div>
                 `;
@@ -303,6 +306,31 @@
 
             } catch (error) {
                 alert(`Error duplicating station: ${error.message}`);
+            }
+        }
+
+        async function deleteStation(networkName, button) {
+            const station = allStations.find(item => item.network_name === networkName);
+            const channel = station?.channel_number ?? 'N/A';
+            const confirmed = window.confirm(
+                `Delete "${networkName}" (channel ${channel})?\n\n` +
+                'This removes only the station configuration. Source media will not be deleted. ' +
+                'This cannot be undone.'
+            );
+
+            if (!confirmed) return;
+
+            const originalLabel = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Deleting…';
+
+            try {
+                await window.fs42Api.delete(`stations/${encodeURIComponent(networkName)}`);
+                await loadStations();
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = originalLabel;
+                alert(`Error deleting station: ${error.detail || error.message || 'Unknown error'}`);
             }
         }
 
